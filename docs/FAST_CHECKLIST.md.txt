@@ -1,0 +1,22 @@
+FAST CHECKLIST (NO EXCUSES)
+
+A) After a run, run:
+   python validate_run.py --run runs/PLTR/<RUN_ID>
+   Must PASS.
+
+B) BacktestAgent must output:
+   predictions_oos.parquet + sanity_tests.json + trades.parquet + pnl_series.parquet + metrics.json
+
+C) DecisionRiskAgent must output:
+   signals.csv with ENTER + ABSTAIN
+   abstain_stats.json + decision_action.json
+
+D) metrics.json must contain:
+   EV_per_trade, max_drawdown, win_rate, avg_trades_per_month
+
+E) sanity_tests.json must PASS:
+   shuffled_labels_auc <= 0.55
+   future_shift_auc <= 0.55
+
+F) final_report.html must DISPLAY (not just exist):
+   Walk-forward summary + Costs + Abstain ratio + EV/trade + Drawdown

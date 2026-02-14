@@ -1,0 +1,46 @@
+DEFINITION OF DONE — MVP TRADING SYSTEM (PLTR)
+
+A run is considered SUCCESS only if ALL of the following exist and pass:
+
+1) Walk-forward OOS:
+   - predictions_oos.parquet
+   - OOS sample size >= 250 rows (else WARNING)
+   - No in-sample leakage
+
+2) Sanity tests:
+   - sanity_tests.json exists
+   - shuffled_labels_auc <= 0.55
+   - future_shift_auc <= 0.55
+   - All marked PASS
+
+3) Costs applied:
+   - costs_assumptions.json exists
+   - metrics.json includes:
+       - EV_per_trade
+       - max_drawdown
+       - win_rate
+       - avg_trades_per_month
+   - trades.parquet exists
+   - pnl_series.parquet exists
+
+4) Decision layer:
+   - signals.csv exists
+   - Contains ENTER and ABSTAIN
+   - abstain_stats.json exists
+   - decision_action.json exists
+
+5) Dashboard:
+   - final_report.html exists
+   - final_report.json exists
+   - Report clearly displays:
+       - Walk-forward summary
+       - Costs
+       - Abstain ratio
+       - EV_per_trade
+       - Drawdown
+
+6) Validation:
+   - validate_run.py passes
+   - status.txt = SUCCESS
+
+If ANY artifact missing → status FAILED.

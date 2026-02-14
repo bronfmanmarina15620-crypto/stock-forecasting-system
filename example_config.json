@@ -1,0 +1,57 @@
+{
+  "ticker": "PLTR",
+  "random_seed": 42,
+  "multi_ticker_enabled": false,
+  "data": {
+    "lookback_days": 730,
+    "primary_source": "yahoo",
+    "cache_enabled": true,
+    "min_trading_days": 252
+  },
+  "features": {
+    "feature_set_id": "v1",
+    "return_windows": [1, 5, 10, 20],
+    "vol_windows": [10, 20, 60],
+    "ma_windows": [20, 50, 200]
+  },
+  "event": {
+    "event_name": "UP_EVENT",
+    "forward_window": 5,
+    "threshold_pct": 2.0,
+    "model_type": "logistic",
+    "calibration_method": "isotonic"
+  },
+  "regime": {
+    "trend_ma_fast": 20,
+    "trend_ma_slow": 50,
+    "vol_threshold": 1.5,
+    "vol_window": 60
+  },
+  "backtest": {
+    "initial_train_days": 252,
+    "test_window_days": 63,
+    "step_days": 21,
+    "commission_pct": 0.001,
+    "spread_bps": 2.0,
+    "slippage_bps": 3.0
+  },
+  "decision": {
+    "default_action": "ABSTAIN",
+    "probability_threshold": 0.60,
+    "min_calibration_confidence": 0.7,
+    "allowed_regimes": ["TREND_LOW_VOL", "TREND_HIGH_VOL"],
+    "max_signals_per_month": 10
+  },
+  "portfolio": {
+    "mode": "PASSIVE",
+    "initial_capital": 100000.0,
+    "max_position_size_pct": 0.20,
+    "max_portfolio_drawdown_pct": 0.15,
+    "cash_buffer_pct": 0.10
+  },
+  "memory": {
+    "enable_learning": true,
+    "auto_apply_suggestions": false,
+    "review_frequency_days": 30
+  }
+}
