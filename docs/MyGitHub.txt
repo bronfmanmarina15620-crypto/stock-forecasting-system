@@ -1,0 +1,34 @@
+cd C:\Users\User\Desktop\marinaTradingProjects\stock-forecasting-system
+
+git add .
+git commit -m "תיאור של מה ששינית"
+git push
+
+
+# אחרי שהוספת קובץ חדש
+git add .
+git commit -m "Added daily automation scripts"
+git push
+
+# אחרי שתיקנת bug
+git add .
+git commit -m "Fixed data cache clearing issue"
+git push
+
+# אחרי שינוי בסוכן
+git add .
+git commit -m "Updated BacktestAgent with walk-forward"
+git push
+```
+
+---
+
+## 🎯 יתרונות שיש לך עכשיו:
+
+✅ **גיבוי בענן** - אם המחשב קורס, הכל שמור
+✅ **היסטוריה** - תמיד יכולה לחזור אחורה
+✅ **גישה מכל מקום** - מהעבודה, מהבית, מהנייד
+✅ **תיק עבודות** - אפשר להראות לאחרים
+✅ **שיתוף** - אם בעתיד תרצי לעבוד עם מישהו
+
+---
