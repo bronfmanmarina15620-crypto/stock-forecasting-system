@@ -298,7 +298,7 @@ def validate_oos_samples(run_path: Path) -> Tuple[List[str], List[str]]:
     
     if not PYARROW_AVAILABLE:
         warnings.append("pyarrow not installed; cannot count OOS rows")
-        print("[!]  pyarrow not installed - cannot verify row count")
+        print("[!]️  pyarrow not installed - cannot verify row count")
         return fail_reasons, warnings
     
     try:
@@ -311,7 +311,7 @@ def validate_oos_samples(run_path: Path) -> Tuple[List[str], List[str]]:
             warnings.append(
                 f"INSUFFICIENT_OOS_SAMPLES: {oos_rows} rows (< {MIN_OOS_ROWS_WARN} recommended)"
             )
-            print(f"[!]  WARNING: Only {oos_rows} OOS samples (< {MIN_OOS_ROWS_WARN} recommended)")
+            print(f"[!]️  WARNING: Only {oos_rows} OOS samples (< {MIN_OOS_ROWS_WARN} recommended)")
         else:
             print(f"[OK] Sufficient OOS samples (≥ {MIN_OOS_ROWS_WARN})")
         
@@ -329,7 +329,7 @@ def print_summary(fail_reasons: List[str], warnings: List[str]):
     print("="*60)
     
     if warnings:
-        print("\n[!]  WARNINGS:")
+        print("\n[!]️  WARNINGS:")
         for w in warnings:
             print(f"  - {w}")
     

@@ -1,0 +1,225 @@
+
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Forecasting System - PLTR</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c3e50;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #34495e;
+            margin-top: 30px;
+        }
+        .card {
+            background-color: #ecf0f1;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 5px;
+            border-left: 4px solid #3498db;
+        }
+        .metric {
+            display: inline-block;
+            margin: 10px 20px 10px 0;
+        }
+        .metric-label {
+            font-weight: bold;
+            color: #7f8c8d;
+        }
+        .metric-value {
+            font-size: 1.3em;
+            color: #2c3e50;
+        }
+        .status-success {
+            color: #27ae60;
+            font-weight: bold;
+        }
+        .status-warning {
+            color: #f39c12;
+            font-weight: bold;
+        }
+        .status-failed {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        .action-enter {
+            background-color: #2ecc71;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-weight: bold;
+            display: inline-block;
+        }
+        .action-abstain {
+            background-color: #95a5a6;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-weight: bold;
+            display: inline-block;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #34495e;
+            color: white;
+        }
+        .rtl {
+            direction: rtl;
+            text-align: right;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📊 Stock Forecasting System Report</h1>
+        
+        <div class="card">
+            <h3>Run Information</h3>
+            <div class="metric">
+                <span class="metric-label">Ticker:</span>
+                <span class="metric-value">PLTR</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Date:</span>
+                <span class="metric-value">2026-02-15 11:41</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Data Range:</span>
+                <span class="metric-value">2024-02-16 to 2026-02-15</span>
+            </div>
+        </div>
+        
+        <h2>🎯 Current Decision (PLTR)</h2>
+        <div class="card">
+            <div class="action-abstain">
+                ABSTAIN
+            </div>
+            <div style="margin-top: 15px;">
+                <div class="metric">
+                    <span class="metric-label">Probability:</span>
+                    <span class="metric-value">64.3%</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Regime:</span>
+                    <span class="metric-value">RANGE_LOW_VOL</span>
+                </div>
+            </div>
+        </div>
+        
+        <h2>📈 Backtest Performance</h2>
+        <div class="card">
+            <div class="metric">
+                <span class="metric-label">AUC:</span>
+                <span class="metric-value">0.464</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Base Rate:</span>
+                <span class="metric-value">15.8%</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Total Samples:</span>
+                <span class="metric-value">38</span>
+            </div>
+        </div>
+        
+        <h2>⚖️ Decision Statistics</h2>
+        <div class="card">
+            <div class="metric">
+                <span class="metric-label">Abstain Days:</span>
+                <span class="metric-value">100.0%</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Signals/Month:</span>
+                <span class="metric-value">0.0</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Expected Value/Signal:</span>
+                <span class="metric-value">0.00%</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Max Drawdown:</span>
+                <span class="metric-value">0.0%</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Win Rate:</span>
+                <span class="metric-value">0.0%</span>
+            </div>
+        </div>
+        
+        <h2>💼 Portfolio Plan (PASSIVE MODE)</h2>
+        <div class="card">
+            <p><strong>Note:</strong> Portfolio is in PASSIVE mode (planning only, no execution)</p>
+            <div class="metric">
+                <span class="metric-label">Cash:</span>
+                <span class="metric-value">$100,000 (100.0%)</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Positions:</span>
+                <span class="metric-value">0</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Risk Level:</span>
+                <span class="metric-value">LOW</span>
+            </div>
+        </div>
+        
+        <h2>🔍 System Status</h2>
+        <div class="card">
+            <table>
+                <tr>
+                    <th>Agent</th>
+                    <th>Status</th>
+                </tr>
+                <tr>
+                    <td>DataAgent</td>
+                    <td class="status-success">SUCCESS</td>
+                </tr>
+                <tr>
+                    <td>BacktestAgent</td>
+                    <td class="status-success">SUCCESS</td>
+                </tr>
+                <tr>
+                    <td>DecisionRiskAgent</td>
+                    <td class="status-success">SUCCESS</td>
+                </tr>
+                <tr>
+                    <td>PortfolioAgent</td>
+                    <td class="status-success">SUCCESS</td>
+                </tr>
+            </table>
+        </div>
+        
+        <div style="margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; color: #7f8c8d; font-size: 0.9em;">
+            <p>Generated by Multi-Agent Stock Forecasting System</p>
+        </div>
+    </div>
+</body>
+</html>
+        

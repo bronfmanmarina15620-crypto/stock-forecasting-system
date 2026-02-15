@@ -1,53 +1,93 @@
 @echo off
-setlocal enabledelayedexpansion
+REM ============================================================
+REM Daily Stock Forecast Automated Run - Improved Version
+REM Copies report BEFORE validation to ensure latest_report.html exists
+REM ============================================================
 
-REM ===== CONFIG =====
-set PROJECT_DIR=C:\Users\User\Desktop\marinaTradingProjects\stock-forecasting-system
-set TICKER=PLTR
-set PYTHON=python
-set RUNS_DIR=%PROJECT_DIR%\runs\%TICKER%
-set LOG_DIR=%PROJECT_DIR%\logs
-if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
+setlocal EnableDelayedExpansion
 
-set TS=%date:~-4%%date:~3,2%%date:~0,2%_%time:~0,2%%time:~3,2%%time:~6,2%
-set TS=%TS: =0%
-set LOGFILE=%LOG_DIR%\daily_%TICKER%_%TS%.log
+REM Set timestamp for logging
+for /f "tokens=2 delims==" %%a in ('wmic OS Get localdatetime /value') do set "dt=%%a"
+set "TIMESTAMP=%dt:~0,8%_%dt:~8,6%"
 
-echo ==== DAILY RUN START (%TICKER%) ==== > "%LOGFILE%"
-echo Project: %PROJECT_DIR% >> "%LOGFILE%"
-echo Time: %date% %time% >> "%LOGFILE%"
+REM Change to script directory
+cd /d "%~dp0.."
 
-cd /d "%PROJECT_DIR%" || (echo FAIL: cannot cd to project >> "%LOGFILE%" & exit /b 1)
+REM Setup log directory
+if not exist "logs" mkdir logs
+set "LOGFILE=logs\daily_run_%TIMESTAMP%.log"
 
-REM 1) Run pipeline
-%PYTHON% run.py --ticker %TICKER% >> "%LOGFILE%" 2>&1
-if errorlevel 1 (
-  echo FAIL: run.py returned non-zero >> "%LOGFILE%"
-  exit /b 1
+REM Start logging
+echo ============================================================ > "%LOGFILE%"
+echo Daily Stock Forecast Run >> "%LOGFILE%"
+echo Timestamp: %TIMESTAMP% >> "%LOGFILE%"
+echo ============================================================ >> "%LOGFILE%"
+echo. >> "%LOGFILE%"
+
+REM Clear cache for fresh data
+echo [%time%] Clearing cache... >> "%LOGFILE%"
+if exist data_cache (
+    rmdir /s /q data_cache >> "%LOGFILE%" 2>&1
+    echo [%time%] Cache cleared >> "%LOGFILE%"
+) else (
+    echo [%time%] No cache to clear >> "%LOGFILE%"
 )
 
-REM 2) Find latest RUN_ID folder
-set LATEST_RUN=
-for /f "delims=" %%D in ('dir "%RUNS_DIR%" /b /ad /o-d 2^>nul') do (
-  set LATEST_RUN=%%D
-  goto :found
-)
-:found
+REM Run the system
+echo [%time%] Starting system run... >> "%LOGFILE%"
+python run.py --ticker PLTR >> "%LOGFILE%" 2>&1
+set RUN_EXIT=%ERRORLEVEL%
 
-if "%LATEST_RUN%"=="" (
-  echo FAIL: No run folders found in %RUNS_DIR% >> "%LOGFILE%"
-  exit /b 1
+if %RUN_EXIT% NEQ 0 (
+    echo [%time%] ERROR: System run failed with exit code %RUN_EXIT% >> "%LOGFILE%"
+    echo FAILED: System run >> "%LOGFILE%"
+    exit /b %RUN_EXIT%
 )
 
-set RUN_PATH=%RUNS_DIR%\%LATEST_RUN%
-echo Latest run: %RUN_PATH% >> "%LOGFILE%"
+echo [%time%] System run completed successfully >> "%LOGFILE%"
 
-REM 3) Validate run (artifact contract)
-%PYTHON% validate_run.py --run "%RUN_PATH%" >> "%LOGFILE%" 2>&1
-if errorlevel 1 (
-  echo FAIL: validate_run.py failed >> "%LOGFILE%"
-  exit /b 1
+REM Find latest run directory
+for /f "delims=" %%i in ('dir /b /ad /o-d "runs\PLTR" 2^>nul ^| findstr /r "^20"') do (
+    set "LATEST_RUN=%%i"
+    goto :found_run
 )
 
-echo PASS: Daily run + validation succeeded >> "%LOGFILE%"
+echo [%time%] ERROR: No run directory found >> "%LOGFILE%"
+echo FAILED: No run directory >> "%LOGFILE%"
+exit /b 1
+
+:found_run
+set "RUN_PATH=runs\PLTR\%LATEST_RUN%"
+echo [%time%] Latest run: %RUN_PATH% >> "%LOGFILE%"
+
+REM Copy report BEFORE validation (so it's always available)
+echo [%time%] Copying latest report... >> "%LOGFILE%"
+if exist "%RUN_PATH%\final_report.html" (
+    copy /y "%RUN_PATH%\final_report.html" "latest_report.html" >nul 2>&1
+    echo [%time%] Latest report copied to latest_report.html >> "%LOGFILE%"
+) else (
+    echo [%time%] WARNING: final_report.html not found in run >> "%LOGFILE%"
+)
+
+REM Validate the run
+echo [%time%] Validating run... >> "%LOGFILE%"
+python validate_run.py --run "%RUN_PATH%" >> "%LOGFILE%" 2>&1
+set VALIDATE_EXIT=%ERRORLEVEL%
+
+if %VALIDATE_EXIT% NEQ 0 (
+    echo [%time%] ERROR: Validation failed with exit code %VALIDATE_EXIT% >> "%LOGFILE%"
+    echo FAILED: Validation >> "%LOGFILE%"
+    exit /b %VALIDATE_EXIT%
+)
+
+echo [%time%] Validation passed >> "%LOGFILE%"
+
+REM Success
+echo. >> "%LOGFILE%"
+echo ============================================================ >> "%LOGFILE%"
+echo SUCCESS: Daily run completed and validated >> "%LOGFILE%"
+echo Run ID: %LATEST_RUN% >> "%LOGFILE%"
+echo Log: %LOGFILE% >> "%LOGFILE%"
+echo ============================================================ >> "%LOGFILE%"
+
 exit /b 0

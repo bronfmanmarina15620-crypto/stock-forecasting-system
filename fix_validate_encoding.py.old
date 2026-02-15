@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+fix_validate_encoding.py - Fix Unicode encoding issues in validate_run.py
+
+This script replaces Unicode symbols that don't work in Windows CMD
+with ASCII alternatives.
+
+Changes:
+✓ → [OK]
+✗ → [X]
+⚠ → [!]
+"""
+
+import sys
+from pathlib import Path
+
+
+def fix_validate_run():
+    """Fix unicode encoding issues in validate_run.py"""
+    
+    validate_py = Path("validate_run.py")
+    
+    if not validate_py.exists():
+        print("ERROR: validate_run.py not found!")
+        print("Make sure you're running this from the project directory.")
+        return False
+    
+    print("Reading validate_run.py...")
+    content = validate_py.read_text(encoding='utf-8')
+    
+    # Track changes
+    original = content
+    changes = []
+    
+    # Replace unicode checkmark ✓ with [OK]
+    if '\u2713' in content or '✓' in content:
+        content = content.replace('\u2713', '[OK]')
+        content = content.replace('✓', '[OK]')
+        changes.append("✓ → [OK]")
+    
+    # Replace unicode x mark ✗ with [X]
+    if '\u2717' in content or '✗' in content:
+        content = content.replace('\u2717', '[X]')
+        content = content.replace('✗', '[X]')
+        changes.append("✗ → [X]")
+    
+    # Replace unicode ballot x ✘ with [X]
+    if '\u2718' in content or '✘' in content:
+        content = content.replace('\u2718', '[X]')
+        content = content.replace('✘', '[X]')
+        if "✘ → [X]" not in changes:
+            changes.append("✘ → [X]")
+    
+    # Replace unicode warning ⚠ with [!]
+    if '\u26a0' in content or '⚠' in content:
+        content = content.replace('\u26a0', '[!]')
+        content = content.replace('⚠', '[!]')
+        changes.append("⚠ → [!]")
+    
+    # Replace ❌ with [X]
+    if '\u274c' in content or '❌' in content:
+        content = content.replace('\u274c', '[X]')
+        content = content.replace('❌', '[X]')
+        if "❌ → [X]" not in changes:
+            changes.append("❌ → [X]")
+    
+    if content == original:
+        print("\nNo changes needed - file already fixed!")
+        return True
+    
+    # Backup original
+    backup = validate_py.with_suffix('.py.backup')
+    print(f"\nCreating backup: {backup}")
+    backup.write_text(original, encoding='utf-8')
+    
+    # Write fixed version
+    print("Writing fixed version...")
+    validate_py.write_text(content, encoding='utf-8')
+    
+    print("\nChanges made:")
+    for change in changes:
+        print(f"  - {change}")
+    
+    print("\n[OK] SUCCESS!")
+    print("\nThe original file has been backed up to:")
+    print(f"  {backup}")
+    print("\nYou can now run validation without encoding errors!")
+    
+    return True
+
+
+if __name__ == "__main__":
+    print("="*60)
+    print("Fix Unicode Encoding in validate_run.py")
+    print("="*60)
+    print()
+    
+    success = fix_validate_run()
+    
+    sys.exit(0 if success else 1)

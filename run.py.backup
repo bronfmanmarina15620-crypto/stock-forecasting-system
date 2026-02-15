@@ -117,7 +117,7 @@ Examples:
         print(f"{'='*60}\n")
         
         if result['status'] == 'SUCCESS':
-            print("[OK] All agents completed successfully")
+            print("✓ All agents completed successfully")
             print(f"\nFinal Report: {run_dir}/final_report.html")
             print(f"JSON Report: {run_dir}/final_report.json")
             print(f"Status: {run_dir}/status.txt")
@@ -132,7 +132,7 @@ Examples:
             return 0
         
         else:
-            print("[FAIL] Run failed")
+            print("✗ Run failed")
             print("\nErrors:")
             for error in result.get('errors', []):
                 print(f"  - {error}")
@@ -140,7 +140,7 @@ Examples:
     
     except Exception as e:
         logger.error(f"Fatal error: {str(e)}")
-        print(f"\n[FAIL] Fatal error: {str(e)}")
+        print(f"\n✗ Fatal error: {str(e)}")
         import traceback
         traceback.print_exc()
         return 1
