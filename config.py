@@ -4,7 +4,7 @@ All settings, parameters, and constants.
 """
 
 from dataclasses import dataclass, field, asdict
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from datetime import datetime
 import json
 import os
@@ -13,7 +13,8 @@ import os
 @dataclass
 class DataConfig:
     """Data fetching and processing configuration."""
-    lookback_days: int = 730  # 2 years of historical data
+    start_date: Optional[str] = "2016-01-01"  # Use full history from this date
+    lookback_days: Optional[int] = None  # Fallback if start_date not set
     primary_source: str = "yahoo"
     backup_sources: List[str] = field(default_factory=lambda: ["stooq"])
     cache_enabled: bool = True

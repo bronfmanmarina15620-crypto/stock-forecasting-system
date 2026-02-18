@@ -47,6 +47,9 @@ class DecisionRiskAgent(BaseAgent):
             # Calculate strategy P&L
             strategy_pnl = self._calculate_strategy_pnl(signals)
             
+            # Calculate abstain stats
+            abstain_stats = self._calculate_abstain_stats(signals)
+            
             # Create decision explanation
             decision_explain = self._create_decision_explanation(signals, strategy_pnl)
             
@@ -55,6 +58,7 @@ class DecisionRiskAgent(BaseAgent):
             
             # Save artifacts
             self.save_artifact('signals.csv', signals)
+            self.save_artifact('abstain_stats.json', abstain_stats)
             self.save_artifact('decision_explain.json', decision_explain)
             self.save_artifact('strategy_pnl.parquet', strategy_pnl)
             self.save_artifact('decision_action.json', decision_action)
@@ -125,6 +129,30 @@ class DecisionRiskAgent(BaseAgent):
         signals.loc[enter_condition, 'action'] = 'ENTER'
         
         return signals
+    
+    def _calculate_abstain_stats(self, signals: pd.DataFrame) -> Dict[str, Any]:
+        """Calculate abstention statistics."""
+        enter_signals = signals[signals['action'] == 'ENTER']
+        abstain_signals = signals[signals['action'] == 'ABSTAIN']
+        
+        total = len(signals)
+        enter_count = len(enter_signals)
+        abstain_count = len(abstain_signals)
+        
+        # Convert dates to string for JSON serialization
+        signals['date'] = pd.to_datetime(signals['date'])
+        enter_dates = enter_signals['date'].dt.strftime('%Y-%m-%d').tolist() if len(enter_signals) > 0 else []
+        abstain_dates = abstain_signals['date'].dt.strftime('%Y-%m-%d').tolist() if len(abstain_signals) > 0 else []
+        
+        return {
+            "total_signals": int(total),
+            "enter_count": int(enter_count),
+            "abstain_count": int(abstain_count),
+            "abstain_rate": float(abstain_count / total) if total > 0 else 0.0,
+            "enter_rate": float(enter_count / total) if total > 0 else 0.0,
+            "enter_dates": enter_dates,
+            "abstain_dates": abstain_dates
+        }
     def _calculate_strategy_pnl(self, signals: pd.DataFrame) -> pd.DataFrame:
         """Calculate strategy P&L with realistic frictions."""
         pnl = signals.copy()

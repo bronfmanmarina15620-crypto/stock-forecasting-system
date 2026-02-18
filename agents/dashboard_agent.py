@@ -44,9 +44,13 @@ class DashboardAgent(BaseAgent):
                 portfolio_output=portfolio_output
             )
             
-            # Save to run directory root
-            html_path = self.run_dir + '/final_report.html'
-            json_path = self.run_dir + '/final_report.json'
+            # Save in DashboardAgent subdirectory
+            import os
+            dashboard_dir = os.path.join(self.run_dir, 'DashboardAgent')
+            os.makedirs(dashboard_dir, exist_ok=True)
+            
+            html_path = os.path.join(dashboard_dir, 'final_report.html')
+            json_path = os.path.join(dashboard_dir, 'final_report.json')
             
             with open(html_path, 'w', encoding='utf-8') as f:
                 f.write(html_report)
@@ -54,6 +58,11 @@ class DashboardAgent(BaseAgent):
             import json
             with open(json_path, 'w', encoding='utf-8') as f:
                 json.dump(json_report, f, indent=2, ensure_ascii=False)
+            
+            # ALSO save copy at root for backward compatibility
+            root_html_path = self.run_dir + '/final_report.html'
+            with open(root_html_path, 'w', encoding='utf-8') as f:
+                f.write(html_report)
             
             # Prepare output
             output = {

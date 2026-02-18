@@ -20,7 +20,18 @@ class DataAgent(BaseAgent):
         try:
             # Calculate date range
             end_date = datetime.now()
-            start_date = end_date - timedelta(days=self.config.data.lookback_days)
+            
+            # Use start_date if set, otherwise use lookback_days
+            if self.config.data.start_date:
+                start_date = datetime.strptime(self.config.data.start_date, '%Y-%m-%d')
+                self.logger.info(f"Using start_date: {self.config.data.start_date}")
+            elif self.config.data.lookback_days:
+                start_date = end_date - timedelta(days=self.config.data.lookback_days)
+                self.logger.info(f"Using lookback_days: {self.config.data.lookback_days}")
+            else:
+                # Default fallback
+                start_date = end_date - timedelta(days=730)
+                self.logger.info("Using default 730 days lookback")
             
             # Fetch data with fallback
             df_raw = self._fetch_data_with_fallback(
