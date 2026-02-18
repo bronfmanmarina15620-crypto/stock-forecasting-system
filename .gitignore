@@ -1,3 +1,10 @@
+#gitignore
+*.backup
+*.bak
+latest_report.html
+runs/
+logs/
+
 # Python
 __pycache__/
 *.py[cod]
