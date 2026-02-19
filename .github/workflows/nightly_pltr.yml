@@ -34,17 +34,22 @@ jobs:
       - name: Run system (PLTR)
         run: python run.py --ticker PLTR
 
-      - name: Find latest run folder and read meta
+      - name: Find latest run folder and read summary
         id: latest
         run: |
           LATEST_DIR=$(ls -dt runs/PLTR/* | head -n 1)
           echo "latest_dir=$LATEST_DIR" >> $GITHUB_OUTPUT
-          python -c "
-          import json, sys
-          s = json.load(open('${LATEST_DIR}/run_summary.json'))
-          m = json.load(open('${LATEST_DIR}/_meta.json'))
-          for k,v in [('run_id', m['run_id']), ('decision', s['decision']), ('has_trade', str(s['has_trade']).lower())]:
-              print(f'{k}={v}')
+          SUMMARY="${LATEST_DIR}/run_summary.json"
+          if [ ! -f "$SUMMARY" ]; then
+            echo "::error::run_summary.json not found in $LATEST_DIR"
+            exit 1
+          fi
+          python3 -c "
+          import json
+          s = json.load(open('${SUMMARY}'))
+          print('run_id=' + s.get('run_id', 'UNKNOWN'))
+          print('decision=' + s.get('decision', 'UNKNOWN'))
+          print('has_trade=' + str(s.get('has_trade', False)).lower())
           " >> $GITHUB_OUTPUT
           echo "Latest run dir: $LATEST_DIR"
 

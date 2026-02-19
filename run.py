@@ -76,19 +76,12 @@ def _write_meta_json(run_dir: str, ticker: str, run_id: str, git_sha: str):
     }
     with open(os.path.join(run_dir, '_meta.json'), 'w') as f:
         json.dump(meta, f, indent=2)
+    return meta['created_utc']
 
 
-def _write_status_txt(run_dir: str, status: str, ticker: str, git_sha: str,
-                      error: str = None):
-    """Write/overwrite status.txt at run lifecycle boundaries."""
-    with open(os.path.join(run_dir, 'status.txt'), 'w') as f:
-        f.write(f"STATUS: {status}\n")
-        f.write(f"TIMESTAMP: {datetime.now(timezone.utc).isoformat()}\n")
-        f.write(f"TICKER: {ticker}\n")
-        f.write(f"Commit: {git_sha}\n")
-        if error:
-            f.write(f"ERROR: {error}\n")
+# ── Single source of truth: summary dict → both files ──────────────
 
+_VALID_DECISIONS = {'ENTER', 'ABSTAIN', 'EXIT', 'UNKNOWN'}
 
 _REQUIRED_OUTPUTS = [
     'final_report.json',
@@ -99,6 +92,35 @@ _REQUIRED_OUTPUTS = [
 ]
 
 
+def _make_summary(ticker: str, run_id: str, git_sha: str, created_utc: str,
+                  status: str, error: str = None) -> dict:
+    """Build a summary dict. Decision/trade fields left at defaults."""
+    return {
+        'ticker': ticker,
+        'run_id': run_id,
+        'status': status,
+        'created_utc': created_utc,
+        'finished_utc': datetime.now(timezone.utc).isoformat(),
+        'git_sha': git_sha,
+        'has_trade': False,
+        'decision': 'UNKNOWN',
+        'error': error,
+    }
+
+
+def _populate_decision(summary: dict, run_dir: str):
+    """Read decision_action.json and populate summary in place."""
+    path = os.path.join(run_dir, 'DecisionRiskAgent', 'decision_action.json')
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        raw = data.get('action', 'UNKNOWN')
+        summary['decision'] = raw if raw in _VALID_DECISIONS else 'UNKNOWN'
+        summary['has_trade'] = data.get('position', 0) == 1
+    except Exception:
+        pass  # defaults already set
+
+
 def _check_required_outputs(run_dir: str) -> str:
     """Return first missing required output path, or None if all present."""
     for rel in _REQUIRED_OUTPUTS:
@@ -107,46 +129,32 @@ def _check_required_outputs(run_dir: str) -> str:
     return None
 
 
-def _read_decision(run_dir: str) -> dict:
-    """Read decision and trade info from decision_action.json."""
-    path = os.path.join(run_dir, 'DecisionRiskAgent', 'decision_action.json')
-    try:
-        with open(path) as f:
-            data = json.load(f)
-        return {
-            'decision': data.get('action', 'UNKNOWN'),
-            'has_trade': data.get('position', 0) == 1,
-        }
-    except Exception:
-        return {'decision': 'UNKNOWN', 'has_trade': False}
+def _persist_summary(summary: dict, run_dir: str):
+    """Write BOTH run_summary.json and status.txt from the same dict."""
+    summary['finished_utc'] = datetime.now(timezone.utc).isoformat()
 
-
-def _write_run_summary(run_dir: str, ticker: str, run_id: str, git_sha: str,
-                       status: str, error: str = None):
-    """Write run_summary.json after run completes."""
-    meta_path = os.path.join(run_dir, '_meta.json')
-    created_utc = ''
-    try:
-        with open(meta_path) as f:
-            created_utc = json.load(f).get('created_utc', '')
-    except Exception:
-        pass
-
-    dec = _read_decision(run_dir)
-    summary = {
-        'ticker': ticker,
-        'run_id': run_id,
-        'status': status,
-        'created_utc': created_utc,
-        'finished_utc': datetime.now(timezone.utc).isoformat(),
-        'git_sha': git_sha,
-        'has_trade': dec['has_trade'],
-        'decision': dec['decision'],
-        'error': error,
-    }
     with open(os.path.join(run_dir, 'run_summary.json'), 'w') as f:
         json.dump(summary, f, indent=2)
-    return summary
+
+    with open(os.path.join(run_dir, 'status.txt'), 'w') as f:
+        f.write(f"STATUS: {summary['status']}\n")
+        f.write(f"TIMESTAMP: {summary['finished_utc']}\n")
+        f.write(f"TICKER: {summary['ticker']}\n")
+        f.write(f"Commit: {summary['git_sha']}\n")
+        if summary.get('error'):
+            f.write(f"ERROR: {summary['error']}\n")
+
+
+def _assert_persisted(run_dir: str, expected_status: str):
+    """Re-read run_summary.json and assert status matches."""
+    path = os.path.join(run_dir, 'run_summary.json')
+    with open(path) as f:
+        on_disk = json.load(f)
+    if on_disk.get('status') != expected_status:
+        raise RuntimeError(
+            f"Summary persistence mismatch: expected {expected_status}, "
+            f"got {on_disk.get('status')}"
+        )
 
 
 def main():
@@ -230,20 +238,21 @@ Examples:
     print(f"RUN_ID={run_id}")
     print(f"Run Directory: {run_dir}\n")
 
-    # Write _meta.json and initial status.txt (STARTED)
-    _write_meta_json(run_dir, ticker, run_id, git_sha)
-    _write_status_txt(run_dir, 'STARTED', ticker, git_sha)
+    # Write _meta.json and initial STARTED state
+    created_utc = _write_meta_json(run_dir, ticker, run_id, git_sha)
+    summary = _make_summary(ticker, run_id, git_sha, created_utc, 'STARTED')
+    _persist_summary(summary, run_dir)
 
     # Save configuration snapshot (JSON + YAML)
     config.save_to_file(os.path.join(run_dir, 'config.json'))
     _save_config_yaml(config, os.path.join(run_dir, 'config_snapshot.yaml'))
-    
+
     # Create orchestrator logger
     logger = AgentLogger('Orchestrator', run_dir)
     logger.info(f"Starting run for {ticker}")
     logger.info(f"Run ID: {run_id}")
     logger.info(f"Configuration: {config.to_dict()}")
-    
+
     # Run orchestrator
     try:
         orchestrator = OrchestratorAgent(config, run_dir, logger)
@@ -254,17 +263,21 @@ Examples:
         print(f"{'='*60}\n")
 
         if result['status'] in ('SUCCESS', 'WARNING'):
-            # Verify required outputs before declaring SUCCESS
+            # Validate required outputs BEFORE writing SUCCESS
             missing = _check_required_outputs(run_dir)
             if missing:
-                err_str = f"Missing required output: {missing}"
-                _write_status_txt(run_dir, 'FAILED', ticker, git_sha, error=err_str)
-                _write_run_summary(run_dir, ticker, run_id, git_sha, 'FAILED', error=err_str)
-                print(f"[FAIL] {err_str}")
+                summary['status'] = 'FAILED'
+                summary['error'] = f"Missing required output: {missing}"
+                _persist_summary(summary, run_dir)
+                print(f"[FAIL] {summary['error']}")
                 return 1
 
-            _write_status_txt(run_dir, 'SUCCESS', ticker, git_sha)
-            summary = _write_run_summary(run_dir, ticker, run_id, git_sha, 'SUCCESS')
+            # All outputs present — populate decision, write SUCCESS
+            _populate_decision(summary, run_dir)
+            summary['status'] = 'SUCCESS'
+            _persist_summary(summary, run_dir)
+            _assert_persisted(run_dir, 'SUCCESS')
+
             print(f"[OK] All agents completed successfully")
             print(f"  Decision: {summary['decision']}  HasTrade: {summary['has_trade']}")
             print(f"\nFinal Report: {run_dir}/final_report.html")
@@ -273,9 +286,10 @@ Examples:
             return 0
 
         else:
-            err_str = '; '.join(result.get('errors', ['Unknown error']))
-            _write_status_txt(run_dir, 'FAILED', ticker, git_sha, error=err_str)
-            _write_run_summary(run_dir, ticker, run_id, git_sha, 'FAILED', error=err_str)
+            summary['status'] = 'FAILED'
+            summary['error'] = '; '.join(result.get('errors', ['Unknown error']))
+            _populate_decision(summary, run_dir)
+            _persist_summary(summary, run_dir)
             print("[FAIL] Run failed")
             print("\nErrors:")
             for error in result.get('errors', []):
@@ -283,8 +297,9 @@ Examples:
             return 1
 
     except Exception as e:
-        _write_status_txt(run_dir, 'FAILED', ticker, git_sha, error=str(e))
-        _write_run_summary(run_dir, ticker, run_id, git_sha, 'FAILED', error=str(e))
+        summary['status'] = 'FAILED'
+        summary['error'] = str(e)
+        _persist_summary(summary, run_dir)
         logger.error(f"Fatal error: {str(e)}")
         print(f"\n[FAIL] Fatal error: {str(e)}")
         import traceback
