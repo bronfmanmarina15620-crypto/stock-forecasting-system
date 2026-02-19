@@ -61,11 +61,19 @@ else
     PASS=false
 fi
 
-# 5. No stale LFS hooks
+# 5. .gitignore: .vscode/* ignored, .vscode/settings.json allowed
+check ".gitignore ignores .vscode/*" \
+    "$(git check-ignore -q .vscode/_should_be_ignored.tmp 2>/dev/null && echo true || echo false)" \
+    ".vscode/* rule missing — other .vscode files would be tracked"
+check ".gitignore allows .vscode/settings.json" \
+    "$(git check-ignore -q .vscode/settings.json 2>/dev/null && echo false || echo true)" \
+    "settings.json is ignored — negation rule !.vscode/settings.json missing"
+
+# 6. No stale LFS hooks (user custom hooks are fine)
 for hook in post-commit post-merge; do
     hf="$REPO_ROOT/.git/hooks/$hook"
-    if [ -f "$hf" ] && grep -q "git.lfs\|git-lfs" "$hf" 2>/dev/null; then
-        check "no LFS $hook hook" "false" "stale LFS hook found at $hf — delete it"
+    if [ -f "$hf" ] && grep -qE "git[-.]lfs" "$hf" 2>/dev/null; then
+        check "no LFS $hook hook" "false" "stale LFS hook at $hf — delete it"
     else
         check "no LFS $hook hook" "true" ""
     fi

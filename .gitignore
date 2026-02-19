@@ -26,8 +26,8 @@ wheels/
 # Jupyter
 .ipynb_checkpoints
 
-# IDEs
-.vscode/
+# IDEs — ignore .vscode contents, but track settings.json
+.vscode/*
 !.vscode/settings.json
 .idea/
 *.swp
