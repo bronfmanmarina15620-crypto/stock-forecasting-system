@@ -17,10 +17,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Intentional failure (manual runs only)
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        run: exit 1
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -55,8 +51,12 @@ jobs:
             ${{ steps.latest.outputs.latest_dir }}/BacktestAgent/sanity_tests.json
           if-no-files-found: error
 
+      - name: Intentional failure (manual runs only)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: exit 1
+
       - name: Notify Telegram on failure
-        if: failure()
+        if: ${{ failure() }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
