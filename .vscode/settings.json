@@ -1,0 +1,8 @@
+{
+  "git.enableSmartCommit": true,
+  "git.confirmSync": false,
+  "git.postCommitCommand": "push",
+  "git.inputValidationSubjectLength": 0,
+  "git.useEditorAsCommitInput": false,
+  "git.terminalGitEditor": false
+}

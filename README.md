@@ -300,6 +300,64 @@ max_signals_per_month = 10               # Limit trading frequency
 
 This is a reference implementation for educational purposes.
 
+## How to Commit & Push
+
+### Method 1: VS Code Source Control UI (recommended)
+
+1. Open the **Source Control** panel (Ctrl+Shift+G)
+2. Stage files by clicking **+** next to each file (or **+** on "Changes" to stage all)
+3. Type a commit message in the input box
+4. Click the checkmark (or press Ctrl+Enter) to commit
+5. Push happens automatically (configured via `.vscode/settings.json`)
+
+### Method 2: CLI helper
+
+```bash
+# Stage your files first
+git add <files>
+
+# Commit + push with inline message
+bash scripts/commit_helper.sh "Your commit message here"
+
+# Or run interactively (will prompt for message)
+bash scripts/commit_helper.sh
+
+# Commit only, skip push
+bash scripts/commit_helper.sh --no-push "Your message"
+
+# Skip the unstaged-changes warning
+bash scripts/commit_helper.sh --allow-unstaged "Your message"
+```
+
+The helper overrides the Codespaces `GIT_EDITOR=true` env var internally so commits never open a stale editor.
+
+### Method 3: Raw git with safe wrapper
+
+If you prefer raw git commands but want the editor override:
+
+```bash
+bash scripts/git_safe.sh commit -m "Your message"
+bash scripts/git_safe.sh push
+```
+
+### Troubleshooting: COMMIT_EDITMSG opens in the editor
+
+GitHub Codespaces sets `GIT_EDITOR=true` globally. When VS Code's Source Control tries to commit without `-m`, git launches the `true` binary as the editor — it exits immediately, produces an empty message, and leaves a stale `.git/COMMIT_EDITMSG` that VS Code then opens as a tab.
+
+**Fix already applied in this repo:**
+- `.git/config` sets `core.editor = "code --wait"` (overrides the env var for this repo)
+- `.vscode/settings.json` sets `git.useEditorAsCommitInput: false` (uses the input box, not an editor)
+- `scripts/commit_helper.sh` and `scripts/git_safe.sh` export safe `GIT_EDITOR`/`EDITOR`/`VISUAL` values
+
+**Quick fix:** run the regression verifier and follow its output:
+```bash
+bash scripts/verify_commit_flow.sh
+```
+If a specific check fails, the script tells you the exact fix. For a manual override:
+```bash
+git config --local core.editor "code --wait"
+```
+
 ## 🤝 Contributing
 
 This is a production-grade template. Key principles:
