@@ -51,10 +51,6 @@ jobs:
             ${{ steps.latest.outputs.latest_dir }}/BacktestAgent/sanity_tests.json
           if-no-files-found: error
 
-      - name: Intentional failure (manual runs only)
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        run: exit 1
-
       - name: Notify Telegram on failure
         if: ${{ failure() }}
         env:
@@ -63,9 +59,6 @@ jobs:
         run: |
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           TEXT="❌ ${TICKER} nightly run FAILED"$'\n'"Run: ${{ github.run_id }}"$'\n'"🔗 ${RUN_URL}"
-          echo "Token length: ${#TELEGRAM_BOT_TOKEN}"
-          echo "Chat ID last 3: ...${TELEGRAM_CHAT_ID: -3}"
-          RESPONSE=$(curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
-            --data-urlencode "text=${TEXT}")
-          echo "Telegram API response: $RESPONSE"
+            --data-urlencode "text=${TEXT}" || true
