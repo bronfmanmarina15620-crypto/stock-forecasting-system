@@ -32,26 +32,20 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run system (PLTR)
-        id: run_system
-        run: |
-          python run.py --ticker PLTR | tee /tmp/run_output.log
-          RUN_ID=$(grep -oP '^RUN_ID=\K.*' /tmp/run_output.log)
-          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+        run: python run.py --ticker PLTR
 
-      - name: Find latest run folder
+      - name: Find latest run folder and read meta
         id: latest
         run: |
           LATEST_DIR=$(ls -dt runs/PLTR/* | head -n 1)
           echo "latest_dir=$LATEST_DIR" >> $GITHUB_OUTPUT
-          echo "Latest run dir: $LATEST_DIR"
+          RUN_ID=$(python -c "import json; print(json.load(open('${LATEST_DIR}/_meta.json'))['run_id'])")
+          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
+          echo "Latest run dir: $LATEST_DIR  (RUN_ID: $RUN_ID)"
 
       - name: Validate run
         run: |
           python validate_run.py --run ${{ steps.latest.outputs.latest_dir }}
-
-      - name: Stamp commit into status.txt
-        run: |
-          echo "Commit: ${{ github.sha }}" >> ${{ steps.latest.outputs.latest_dir }}/status.txt
 
       - name: Upload reports (artifact)
         uses: actions/upload-artifact@v4
@@ -62,6 +56,7 @@ jobs:
             ${{ steps.latest.outputs.latest_dir }}/final_report.json
             ${{ steps.latest.outputs.latest_dir }}/status.json
             ${{ steps.latest.outputs.latest_dir }}/status.txt
+            ${{ steps.latest.outputs.latest_dir }}/_meta.json
             ${{ steps.latest.outputs.latest_dir }}/config_snapshot.yaml
             ${{ steps.latest.outputs.latest_dir }}/BacktestAgent/metrics.json
             ${{ steps.latest.outputs.latest_dir }}/BacktestAgent/sanity_tests.json
@@ -83,7 +78,7 @@ jobs:
           SHORT_SHA="${{ github.sha }}"
           SHORT_SHA="${SHORT_SHA:0:7}"
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-          RUN_ID="${{ steps.run_system.outputs.run_id }}"
+          RUN_ID="${{ steps.latest.outputs.run_id }}"
           TEXT=$'✅ Nightly run SUCCESS\nTicker: PLTR\nRUN_ID: '"${RUN_ID}"$'\nCommit: '"${SHORT_SHA}"$'\nActions: '"${RUN_URL}"
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \

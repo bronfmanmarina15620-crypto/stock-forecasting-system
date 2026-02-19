@@ -8,10 +8,11 @@ Usage:
 """
 
 import argparse
+import subprocess
 import sys
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add current directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -52,6 +53,41 @@ def _save_config_yaml(config: SystemConfig, filepath: str):
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     with open(filepath, 'w') as f:
         f.write(yaml_str)
+
+
+def _get_git_sha() -> str:
+    """Return full git SHA, or 'unknown' if not in a git repo."""
+    try:
+        return subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'],
+            stderr=subprocess.DEVNULL
+        ).decode().strip()
+    except Exception:
+        return 'unknown'
+
+
+def _write_meta_json(run_dir: str, ticker: str, run_id: str, git_sha: str):
+    """Write _meta.json immediately after run dir creation."""
+    meta = {
+        'ticker': ticker,
+        'run_id': run_id,
+        'created_utc': datetime.now(timezone.utc).isoformat(),
+        'git_sha': git_sha,
+    }
+    with open(os.path.join(run_dir, '_meta.json'), 'w') as f:
+        json.dump(meta, f, indent=2)
+
+
+def _write_status_txt(run_dir: str, status: str, ticker: str, git_sha: str,
+                      error: str = None):
+    """Write/overwrite status.txt at run lifecycle boundaries."""
+    with open(os.path.join(run_dir, 'status.txt'), 'w') as f:
+        f.write(f"STATUS: {status}\n")
+        f.write(f"TIMESTAMP: {datetime.now(timezone.utc).isoformat()}\n")
+        f.write(f"TICKER: {ticker}\n")
+        f.write(f"Commit: {git_sha}\n")
+        if error:
+            f.write(f"ERROR: {error}\n")
 
 
 def main():
@@ -129,10 +165,16 @@ Examples:
     run_id = generate_run_id()
     run_dir = setup_run_directory(ticker, run_id, args.run_dir)
     
+    git_sha = _get_git_sha()
+
     print(f"Run ID: {run_id}")
     print(f"RUN_ID={run_id}")
     print(f"Run Directory: {run_dir}\n")
-    
+
+    # Write _meta.json and initial status.txt (STARTED)
+    _write_meta_json(run_dir, ticker, run_id, git_sha)
+    _write_status_txt(run_dir, 'STARTED', ticker, git_sha)
+
     # Save configuration snapshot (JSON + YAML)
     config.save_to_file(os.path.join(run_dir, 'config.json'))
     _save_config_yaml(config, os.path.join(run_dir, 'config_snapshot.yaml'))
@@ -153,21 +195,25 @@ Examples:
         print(f"{'='*60}\n")
         
         if result['status'] == 'SUCCESS':
+            _write_status_txt(run_dir, 'SUCCESS', ticker, git_sha)
             print("[OK] All agents completed successfully")
             print(f"\nFinal Report: {run_dir}/final_report.html")
             print(f"JSON Report: {run_dir}/final_report.json")
             print(f"Status: {run_dir}/status.txt")
             return 0
-        
+
         elif result['status'] == 'WARNING':
+            _write_status_txt(run_dir, 'WARNING', ticker, git_sha)
             print("⚠ Completed with warnings")
             print(f"\nFinal Report: {run_dir}/final_report.html")
             print("\nWarnings:")
             for error in result.get('errors', []):
                 print(f"  - {error}")
             return 0
-        
+
         else:
+            err_str = '; '.join(result.get('errors', ['Unknown error']))
+            _write_status_txt(run_dir, 'FAILED', ticker, git_sha, error=err_str)
             print("[FAIL] Run failed")
             print("\nErrors:")
             for error in result.get('errors', []):
@@ -175,6 +221,7 @@ Examples:
             return 1
     
     except Exception as e:
+        _write_status_txt(run_dir, 'FAILED', ticker, git_sha, error=str(e))
         logger.error(f"Fatal error: {str(e)}")
         print(f"\n[FAIL] Fatal error: {str(e)}")
         import traceback
