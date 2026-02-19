@@ -1,5 +1,16 @@
 """
 DecisionRiskAgent - Converts probabilities into ENTER/ABSTAIN decisions.
+
+Phase 2 integration point:
+    Strategy logic currently lives in:
+        - agents/decision_risk_agent.py  (signal generation: ENTER/ABSTAIN)
+        - agents/backtest_agent.py       (walk-forward ML backtest)
+        - agents/regime_agent.py         (regime labels: MA20/50 crossover + vol)
+        - agents/feature_agent.py        (ATR14, MA20/50/200 features)
+
+    Integration point: StrategyAgent (new) runs before DecisionRiskAgent.
+    DecisionRiskAgent will consume StrategyAgent's entry_signal / regime_ok /
+    range_high_vol to produce ENTER or ABSTAIN (never SHORT).
 """
 
 import pandas as pd
@@ -7,6 +18,7 @@ import numpy as np
 import pickle
 from typing import Dict, Any
 from .base_agent import BaseAgent
+from determinism import content_hash_sha256
 
 
 class DecisionRiskAgent(BaseAgent):
@@ -55,6 +67,9 @@ class DecisionRiskAgent(BaseAgent):
             
             # Generate abstain stats
             abstain_stats = self._generate_abstain_stats(signals, decision_explain)
+
+            # Embed deterministic content fingerprint
+            decision_action['content_hash_sha256'] = content_hash_sha256(decision_action)
 
             # Save artifacts
             self.save_artifact('signals.csv', signals)
