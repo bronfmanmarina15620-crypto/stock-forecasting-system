@@ -9,6 +9,7 @@ import pickle
 from sklearn.metrics import roc_auc_score, brier_score_loss
 from sklearn.linear_model import LogisticRegression
 from .base_agent import BaseAgent
+from determinism import content_hash_sha256
 
 
 class BacktestAgent(BaseAgent):
@@ -50,6 +51,9 @@ class BacktestAgent(BaseAgent):
 
             # Run sanity tests
             sanity_results = self._run_sanity_tests(features, prices, regimes)
+
+            # Embed deterministic content fingerprint
+            metrics['content_hash_sha256'] = content_hash_sha256(metrics)
 
             # Save all required artifacts
             self.save_artifact('predictions_oos.parquet', predictions)

@@ -1,0 +1,89 @@
+name: Determinism Check
+
+on:
+  schedule:
+    # Weekly on Sundays at 06:00 UTC
+    - cron: "0 6 * * 0"
+  workflow_dispatch: {}
+
+jobs:
+  determinism:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONHASHSEED: "0"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run determinism check
+        id: det_check
+        run: bash scripts/determinism_check.sh PLTR
+
+      - name: Upload run artifacts on failure
+        if: failure() && steps.det_check.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: determinism-runs
+          path: runs/PLTR/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Print normalised diff on failure
+        if: failure() && steps.det_check.outcome == 'failure'
+        run: |
+          echo "=== Normalised diffs of mismatching target files ==="
+          # Find the two most recent run directories
+          RUN_B=$(ls -dt runs/PLTR/* 2>/dev/null | head -n 1)
+          RUN_A=$(ls -dt runs/PLTR/* 2>/dev/null | head -n 2 | tail -n 1)
+          if [[ -z "$RUN_A" || -z "$RUN_B" ]]; then
+            echo "Could not locate run directories for diff."
+            exit 0
+          fi
+          echo "Run A: $(basename "$RUN_A")"
+          echo "Run B: $(basename "$RUN_B")"
+          for f in BacktestAgent/metrics.json final_report.json DecisionRiskAgent/decision_action.json; do
+            FA="$RUN_A/$f"
+            FB="$RUN_B/$f"
+            [[ ! -f "$FA" || ! -f "$FB" ]] && continue
+            NA=$(mktemp)
+            NB=$(mktemp)
+            python scripts/normalize_json.py "$FA" "$NA"
+            python scripts/normalize_json.py "$FB" "$NB"
+            if ! diff -q "$NA" "$NB" > /dev/null 2>&1; then
+              echo ""
+              echo "--- CONTENT DRIFT: $f (real non-determinism) ---"
+              diff -u "$NA" "$NB" | head -n 100
+            elif ! diff -q "$FA" "$FB" > /dev/null 2>&1; then
+              echo ""
+              echo "--- VOLATILE ONLY: $f (raw differs, normalised matches) ---"
+            else
+              echo ""
+              echo "--- IDENTICAL: $f ---"
+            fi
+            rm -f "$NA" "$NB"
+          done
+
+      - name: Notify Telegram on failure
+        if: ${{ failure() }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          TEXT="Determinism check FAILED"$'\n'"${RUN_URL}"
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${TEXT}" || true

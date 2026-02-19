@@ -46,7 +46,7 @@ class BaseAgent(ABC):
         output_data['timestamp'] = str(pd.Timestamp.now())
         
         with open(output_path, 'w') as f:
-            json.dump(output_data, f, indent=2, default=str)
+            json.dump(output_data, f, indent=2, default=str, sort_keys=True)
         
         self.logger.info(f"Saved output to {output_path}")
         return output_path
@@ -68,7 +68,7 @@ class BaseAgent(ABC):
         # Handle different data types
         if isinstance(data, (dict, list)):
             with open(filepath, 'w') as f:
-                json.dump(data, f, indent=2, default=str)
+                json.dump(data, f, indent=2, default=str, sort_keys=True)
         elif hasattr(data, 'to_parquet'):  # DataFrame
             data.to_parquet(filepath)
         elif hasattr(data, 'to_csv'):  # DataFrame

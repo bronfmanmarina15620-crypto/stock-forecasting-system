@@ -17,6 +17,8 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
 
+from determinism import CONTENT_HASH_KEY, content_hash_sha256
+
 try:
     import pyarrow.parquet as pq
     PYARROW_AVAILABLE = True
@@ -405,6 +407,62 @@ def validate_status_json(run_path: Path) -> Tuple[List[str], List[str]]:
     return fail_reasons, warnings
 
 
+# Files covered by the content_hash_sha256 integrity check.
+# Paths are relative to the run directory.
+_CONTENT_HASH_TARGETS = [
+    "BacktestAgent/metrics.json",
+    "final_report.json",
+    "DecisionRiskAgent/decision_action.json",
+]
+
+
+def validate_content_hashes(run_path: Path) -> Tuple[List[str], List[str]]:
+    """Verify that embedded content_hash_sha256 matches recomputed hash."""
+    fail_reasons = []
+    warnings = []
+
+    print("\n" + "=" * 60)
+    print("STEP 8: Validating content_hash_sha256 Integrity")
+    print("=" * 60)
+
+    for relpath in _CONTENT_HASH_TARGETS:
+        filepath = run_path / relpath
+        if not filepath.exists():
+            # Missing files are already caught by validate_artifacts
+            print(f"  [--] {relpath}: skipped (file missing)")
+            continue
+
+        try:
+            data = load_json(filepath)
+        except Exception as e:
+            fail_reasons.append(f"{relpath}: failed to parse JSON: {e}")
+            print(f"  [X] {relpath}: failed to parse JSON: {e}")
+            continue
+
+        stored = data.get(CONTENT_HASH_KEY)
+        if stored is None:
+            fail_reasons.append(
+                f"{relpath}: missing {CONTENT_HASH_KEY} field"
+            )
+            print(f"  [X] {relpath}: missing {CONTENT_HASH_KEY}")
+            continue
+
+        recomputed = content_hash_sha256(data)
+
+        if stored == recomputed:
+            print(f"  [OK] {relpath}: {stored[:16]}...")
+        else:
+            fail_reasons.append(
+                f"{relpath}: {CONTENT_HASH_KEY} mismatch — "
+                f"stored={stored[:16]}… recomputed={recomputed[:16]}…"
+            )
+            print(f"  [X] {relpath}: MISMATCH")
+            print(f"       stored:     {stored}")
+            print(f"       recomputed: {recomputed}")
+
+    return fail_reasons, warnings
+
+
 def print_summary(fail_reasons: List[str], warnings: List[str]):
     """Print final validation summary."""
     print("\n" + "=" * 60)
@@ -456,6 +514,7 @@ def validate_run(run_path_str: str) -> bool:
         validate_oos_samples,
         validate_final_report_schema,
         validate_status_json,
+        validate_content_hashes,
     ]
 
     for validator in validators:
