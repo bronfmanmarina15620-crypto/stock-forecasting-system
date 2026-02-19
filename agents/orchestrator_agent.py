@@ -12,6 +12,7 @@ from .feature_agent import FeatureAgent
 from .regime_agent import RegimeAgent
 from .event_model_agent import EventModelAgent
 from .backtest_agent import BacktestAgent
+from .strategy_agent import StrategyAgent
 from .decision_risk_agent import DecisionRiskAgent
 from .portfolio_agent import PortfolioAgent
 from .dashboard_agent import DashboardAgent
@@ -34,10 +35,11 @@ class OrchestratorAgent(BaseAgent):
             RegimeAgent,
             EventModelAgent,
             BacktestAgent,
+            StrategyAgent,
             DecisionRiskAgent,
             PortfolioAgent,
             DashboardAgent,
-            MemoryLearningAgent
+            MemoryLearningAgent,
         ]
 
     def run(self) -> Dict[str, Any]:
@@ -192,6 +194,6 @@ class OrchestratorAgent(BaseAgent):
 
         status_path = os.path.join(self.run_dir, 'status.json')
         with open(status_path, 'w') as f:
-            json.dump(status_data, f, indent=2)
+            json.dump(status_data, f, indent=2, sort_keys=True)
 
         self.logger.info(f"Status JSON written: {status_path}")

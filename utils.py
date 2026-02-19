@@ -36,10 +36,11 @@ def setup_run_directory(ticker: str, run_id: str, base_dir: str = "runs") -> str
         "RegimeAgent",
         "EventModelAgent",
         "BacktestAgent",
+        "StrategyAgent",
         "DecisionRiskAgent",
         "PortfolioAgent",
         "DashboardAgent",
-        "MemoryLearningAgent"
+        "MemoryLearningAgent",
     ]
     
     for agent in agents:
@@ -59,7 +60,7 @@ def save_agent_output(
     output_path = os.path.join(agent_dir, "output.json")
     
     with open(output_path, 'w') as f:
-        json.dump(output_data, f, indent=2, default=str)
+        json.dump(output_data, f, indent=2, default=str, sort_keys=True)
     
     if logger_instance:
         logger_instance.info(f"Saved output to {output_path}")
@@ -79,7 +80,13 @@ def load_agent_output(run_dir: str, agent_name: str) -> Dict[str, Any]:
 
 
 def set_random_seeds(seed: int = 42):
-    """Set random seeds for reproducibility."""
+    """Set random seeds for reproducibility.
+
+    Note: PYTHONHASHSEED must be set before the interpreter starts
+    (e.g. via env var in the shell). We set it here too for documentation
+    but it only takes effect if Python hasn't cached hash seeds yet.
+    """
+    os.environ['PYTHONHASHSEED'] = str(seed)
     random.seed(seed)
     np.random.seed(seed)
     # If using scikit-learn, models will use random_state parameter
