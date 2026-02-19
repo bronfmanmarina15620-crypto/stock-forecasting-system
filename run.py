@@ -10,6 +10,7 @@ Usage:
 import argparse
 import sys
 import os
+import json
 from datetime import datetime
 
 # Add current directory to path
@@ -18,6 +19,39 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from config import SystemConfig, get_default_config
 from utils import generate_run_id, setup_run_directory, set_random_seeds, AgentLogger
 from agents import OrchestratorAgent
+
+
+def _save_config_yaml(config: SystemConfig, filepath: str):
+    """Save config as YAML for human readability."""
+    d = config.to_dict()
+
+    def _dict_to_yaml(data, indent=0):
+        lines = []
+        prefix = "  " * indent
+        for k, v in data.items():
+            if isinstance(v, dict):
+                lines.append(f"{prefix}{k}:")
+                lines.append(_dict_to_yaml(v, indent + 1))
+            elif isinstance(v, list):
+                lines.append(f"{prefix}{k}:")
+                for item in v:
+                    if isinstance(item, dict):
+                        lines.append(f"{prefix}  -")
+                        lines.append(_dict_to_yaml(item, indent + 2))
+                    else:
+                        lines.append(f"{prefix}  - {item}")
+            elif isinstance(v, bool):
+                lines.append(f"{prefix}{k}: {'true' if v else 'false'}")
+            elif v is None:
+                lines.append(f"{prefix}{k}: null")
+            else:
+                lines.append(f"{prefix}{k}: {v}")
+        return "\n".join(lines)
+
+    yaml_str = f"# Config snapshot - frozen at run start\n{_dict_to_yaml(d)}\n"
+    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+    with open(filepath, 'w') as f:
+        f.write(yaml_str)
 
 
 def main():
@@ -98,8 +132,9 @@ Examples:
     print(f"Run ID: {run_id}")
     print(f"Run Directory: {run_dir}\n")
     
-    # Save configuration snapshot
+    # Save configuration snapshot (JSON + YAML)
     config.save_to_file(os.path.join(run_dir, 'config.json'))
+    _save_config_yaml(config, os.path.join(run_dir, 'config_snapshot.yaml'))
     
     # Create orchestrator logger
     logger = AgentLogger('Orchestrator', run_dir)

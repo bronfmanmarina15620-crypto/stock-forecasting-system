@@ -53,12 +53,16 @@ class DecisionRiskAgent(BaseAgent):
             # Get current decision (last available)
             decision_action = self._get_current_decision(predictions)
             
+            # Generate abstain stats
+            abstain_stats = self._generate_abstain_stats(signals, decision_explain)
+
             # Save artifacts
             self.save_artifact('signals.csv', signals)
             self.save_artifact('decision_explain.json', decision_explain)
             self.save_artifact('strategy_pnl.parquet', strategy_pnl)
             self.save_artifact('decision_action.json', decision_action)
-            
+            self.save_artifact('abstain_stats.json', abstain_stats)
+
             # Prepare output
             output = {
                 'status': 'SUCCESS',
@@ -255,4 +259,22 @@ class DecisionRiskAgent(BaseAgent):
             'drawdown_risk_estimate': 0.0,  # Placeholder
             'regime': regime,
             'date': str(last['date']) if 'date' in predictions.columns else str(last.name)
+        }
+
+    def _generate_abstain_stats(
+        self,
+        signals: pd.DataFrame,
+        decision_explain: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Generate abstain statistics required by validator."""
+        total = len(signals)
+        enter_count = int((signals['action'] == 'ENTER').sum())
+        abstain_count = int((signals['action'] == 'ABSTAIN').sum())
+
+        return {
+            'abstain_ratio': float(abstain_count / total) if total > 0 else 1.0,
+            'enter_count': enter_count,
+            'abstain_count': abstain_count,
+            'signals_per_month': decision_explain.get('signals_per_month', 0.0),
+            'total_days': total
         }
