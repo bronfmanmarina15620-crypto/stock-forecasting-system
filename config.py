@@ -89,12 +89,41 @@ class PortfolioConfig:
 
 
 @dataclass
+class StrategyConfig:
+    """Phase 2 MA150+ATR strategy parameters.
+
+    Defaults mirror config/strategy.yaml (the human-readable source of truth).
+    Costs are NOT duplicated here; they live in BacktestConfig.
+    """
+    atr_length: int = 14
+    atr_mult: float = 3.0
+    slope_lookback: int = 20
+    entry_lookback: int = 20
+    atr_pct_high: float = 0.04
+    slope_min: float = 0.0
+    risk_per_trade: float = 0.005  # placeholder for Phase 4
+
+
+@dataclass
 class MemoryConfig:
     """Memory and learning configuration."""
     db_path: str = "memory/memory_db.sqlite"
     enable_learning: bool = True
     auto_apply_suggestions: bool = False  # MUST be False
     review_frequency_days: int = 30
+
+
+def _load_strategy_yaml(filepath: str) -> Dict[str, Any]:
+    """Load strategy parameters from YAML.  Falls back to empty dict."""
+    try:
+        import yaml
+        with open(filepath, 'r') as f:
+            raw = yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+    # Only extract keys recognised by StrategyConfig (skip 'costs' block)
+    allowed = {f.name for f in StrategyConfig.__dataclass_fields__.values()}
+    return {k: v for k, v in raw.items() if k in allowed}
 
 
 @dataclass
@@ -116,6 +145,7 @@ class SystemConfig:
     decision: DecisionConfig = field(default_factory=DecisionConfig)
     portfolio: PortfolioConfig = field(default_factory=PortfolioConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
+    strategy: StrategyConfig = field(default_factory=StrategyConfig)
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert configuration to dictionary."""
@@ -125,7 +155,7 @@ class SystemConfig:
         """Save configuration to JSON file."""
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         with open(filepath, 'w') as f:
-            json.dump(self.to_dict(), f, indent=2)
+            json.dump(self.to_dict(), f, indent=2, sort_keys=True)
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'SystemConfig':
@@ -139,6 +169,7 @@ class SystemConfig:
         data['decision'] = DecisionConfig(**data.get('decision', {}))
         data['portfolio'] = PortfolioConfig(**data.get('portfolio', {}))
         data['memory'] = MemoryConfig(**data.get('memory', {}))
+        data['strategy'] = StrategyConfig(**data.get('strategy', {}))
         return cls(**data)
     
     @classmethod
@@ -150,8 +181,16 @@ class SystemConfig:
 
 
 def get_default_config(ticker: str = "PLTR") -> SystemConfig:
-    """Get default configuration for a ticker."""
-    config = SystemConfig()
+    """Get default configuration for a ticker.
+
+    If config/strategy.yaml exists, its values override StrategyConfig defaults.
+    """
+    # Try loading strategy YAML relative to this file
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    yaml_path = os.path.join(base_dir, "config", "strategy.yaml")
+    strategy_overrides = _load_strategy_yaml(yaml_path)
+
+    config = SystemConfig(strategy=StrategyConfig(**strategy_overrides))
     config.ticker = ticker
     config.tickers = [ticker]
     return config

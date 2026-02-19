@@ -1,0 +1,20 @@
+# Phase 2 strategy parameters — MA150 + ATR(14) trailing stop
+# Loaded by SystemConfig at startup.  Values here are the single
+# source of truth; the StrategyConfig dataclass mirrors them as defaults.
+
+atr_length: 14
+atr_mult: 3.0
+slope_lookback: 20
+entry_lookback: 20
+atr_pct_high: 0.04
+slope_min: 0.0
+
+# Trading costs — wired to existing BacktestConfig plumbing.
+# These values are NOT loaded separately; they are here for
+# documentation only.  Override via BacktestConfig if needed.
+costs:
+  commission: 0.001      # BacktestConfig.commission_pct
+  spread: 2.0            # BacktestConfig.spread_bps
+  slippage: 3.0          # BacktestConfig.slippage_bps
+
+risk_per_trade: 0.005    # placeholder for Phase 4
