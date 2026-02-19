@@ -130,6 +130,7 @@ Examples:
     run_dir = setup_run_directory(ticker, run_id, args.run_dir)
     
     print(f"Run ID: {run_id}")
+    print(f"RUN_ID={run_id}")
     print(f"Run Directory: {run_dir}\n")
     
     # Save configuration snapshot (JSON + YAML)
