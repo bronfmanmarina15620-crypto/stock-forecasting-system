@@ -39,9 +39,14 @@ jobs:
         run: |
           LATEST_DIR=$(ls -dt runs/PLTR/* | head -n 1)
           echo "latest_dir=$LATEST_DIR" >> $GITHUB_OUTPUT
-          RUN_ID=$(python -c "import json; print(json.load(open('${LATEST_DIR}/_meta.json'))['run_id'])")
-          echo "run_id=$RUN_ID" >> $GITHUB_OUTPUT
-          echo "Latest run dir: $LATEST_DIR  (RUN_ID: $RUN_ID)"
+          python -c "
+          import json, sys
+          s = json.load(open('${LATEST_DIR}/run_summary.json'))
+          m = json.load(open('${LATEST_DIR}/_meta.json'))
+          for k,v in [('run_id', m['run_id']), ('decision', s['decision']), ('has_trade', str(s['has_trade']).lower())]:
+              print(f'{k}={v}')
+          " >> $GITHUB_OUTPUT
+          echo "Latest run dir: $LATEST_DIR"
 
       - name: Validate run
         run: |
@@ -57,6 +62,7 @@ jobs:
             ${{ steps.latest.outputs.latest_dir }}/status.json
             ${{ steps.latest.outputs.latest_dir }}/status.txt
             ${{ steps.latest.outputs.latest_dir }}/_meta.json
+            ${{ steps.latest.outputs.latest_dir }}/run_summary.json
             ${{ steps.latest.outputs.latest_dir }}/config_snapshot.yaml
             ${{ steps.latest.outputs.latest_dir }}/BacktestAgent/metrics.json
             ${{ steps.latest.outputs.latest_dir }}/BacktestAgent/sanity_tests.json
@@ -79,7 +85,9 @@ jobs:
           SHORT_SHA="${SHORT_SHA:0:7}"
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           RUN_ID="${{ steps.latest.outputs.run_id }}"
-          TEXT=$'✅ Nightly run SUCCESS\nTicker: PLTR\nRUN_ID: '"${RUN_ID}"$'\nCommit: '"${SHORT_SHA}"$'\nActions: '"${RUN_URL}"
+          DECISION="${{ steps.latest.outputs.decision }}"
+          HAS_TRADE="${{ steps.latest.outputs.has_trade }}"
+          TEXT=$'✅ Nightly run SUCCESS\nTicker: PLTR\nRUN_ID: '"${RUN_ID}"$'\nCommit: '"${SHORT_SHA}"$'\nDecision: '"${DECISION}"$'\nHasTrade: '"${HAS_TRADE}"$'\nActions: '"${RUN_URL}"
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
             --data-urlencode "text=${TEXT}" || true

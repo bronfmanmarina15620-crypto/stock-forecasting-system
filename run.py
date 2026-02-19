@@ -90,6 +90,65 @@ def _write_status_txt(run_dir: str, status: str, ticker: str, git_sha: str,
             f.write(f"ERROR: {error}\n")
 
 
+_REQUIRED_OUTPUTS = [
+    'final_report.json',
+    'final_report.html',
+    'BacktestAgent/metrics.json',
+    'DecisionRiskAgent/decision_action.json',
+    '_meta.json',
+]
+
+
+def _check_required_outputs(run_dir: str) -> str:
+    """Return first missing required output path, or None if all present."""
+    for rel in _REQUIRED_OUTPUTS:
+        if not os.path.exists(os.path.join(run_dir, rel)):
+            return rel
+    return None
+
+
+def _read_decision(run_dir: str) -> dict:
+    """Read decision and trade info from decision_action.json."""
+    path = os.path.join(run_dir, 'DecisionRiskAgent', 'decision_action.json')
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return {
+            'decision': data.get('action', 'UNKNOWN'),
+            'has_trade': data.get('position', 0) == 1,
+        }
+    except Exception:
+        return {'decision': 'UNKNOWN', 'has_trade': False}
+
+
+def _write_run_summary(run_dir: str, ticker: str, run_id: str, git_sha: str,
+                       status: str, error: str = None):
+    """Write run_summary.json after run completes."""
+    meta_path = os.path.join(run_dir, '_meta.json')
+    created_utc = ''
+    try:
+        with open(meta_path) as f:
+            created_utc = json.load(f).get('created_utc', '')
+    except Exception:
+        pass
+
+    dec = _read_decision(run_dir)
+    summary = {
+        'ticker': ticker,
+        'run_id': run_id,
+        'status': status,
+        'created_utc': created_utc,
+        'finished_utc': datetime.now(timezone.utc).isoformat(),
+        'git_sha': git_sha,
+        'has_trade': dec['has_trade'],
+        'decision': dec['decision'],
+        'error': error,
+    }
+    with open(os.path.join(run_dir, 'run_summary.json'), 'w') as f:
+        json.dump(summary, f, indent=2)
+    return summary
+
+
 def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(
@@ -189,39 +248,43 @@ Examples:
     try:
         orchestrator = OrchestratorAgent(config, run_dir, logger)
         result = orchestrator.run()
-        
+
         print(f"\n{'='*60}")
         print(f"Run Status: {result['status']}")
         print(f"{'='*60}\n")
-        
-        if result['status'] == 'SUCCESS':
+
+        if result['status'] in ('SUCCESS', 'WARNING'):
+            # Verify required outputs before declaring SUCCESS
+            missing = _check_required_outputs(run_dir)
+            if missing:
+                err_str = f"Missing required output: {missing}"
+                _write_status_txt(run_dir, 'FAILED', ticker, git_sha, error=err_str)
+                _write_run_summary(run_dir, ticker, run_id, git_sha, 'FAILED', error=err_str)
+                print(f"[FAIL] {err_str}")
+                return 1
+
             _write_status_txt(run_dir, 'SUCCESS', ticker, git_sha)
-            print("[OK] All agents completed successfully")
+            summary = _write_run_summary(run_dir, ticker, run_id, git_sha, 'SUCCESS')
+            print(f"[OK] All agents completed successfully")
+            print(f"  Decision: {summary['decision']}  HasTrade: {summary['has_trade']}")
             print(f"\nFinal Report: {run_dir}/final_report.html")
             print(f"JSON Report: {run_dir}/final_report.json")
             print(f"Status: {run_dir}/status.txt")
             return 0
 
-        elif result['status'] == 'WARNING':
-            _write_status_txt(run_dir, 'WARNING', ticker, git_sha)
-            print("⚠ Completed with warnings")
-            print(f"\nFinal Report: {run_dir}/final_report.html")
-            print("\nWarnings:")
-            for error in result.get('errors', []):
-                print(f"  - {error}")
-            return 0
-
         else:
             err_str = '; '.join(result.get('errors', ['Unknown error']))
             _write_status_txt(run_dir, 'FAILED', ticker, git_sha, error=err_str)
+            _write_run_summary(run_dir, ticker, run_id, git_sha, 'FAILED', error=err_str)
             print("[FAIL] Run failed")
             print("\nErrors:")
             for error in result.get('errors', []):
                 print(f"  - {error}")
             return 1
-    
+
     except Exception as e:
         _write_status_txt(run_dir, 'FAILED', ticker, git_sha, error=str(e))
+        _write_run_summary(run_dir, ticker, run_id, git_sha, 'FAILED', error=str(e))
         logger.error(f"Fatal error: {str(e)}")
         print(f"\n[FAIL] Fatal error: {str(e)}")
         import traceback
