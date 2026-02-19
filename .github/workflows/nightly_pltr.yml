@@ -1,0 +1,50 @@
+name: Nightly PLTR Run
+
+on:
+  schedule:
+    # 21:00 UTC ~= 23:00 Israel (winter time). Adjust when DST changes.
+    - cron: "0 21 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  run-pltr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run system (PLTR)
+        run: |
+          python run.py --ticker PLTR
+
+      - name: Find latest run folder
+        id: latest
+        run: |
+          LATEST_DIR=$(ls -dt runs/PLTR/* | head -n 1)
+          echo "latest_dir=$LATEST_DIR" >> $GITHUB_OUTPUT
+          echo "Latest run dir: $LATEST_DIR"
+
+      - name: Upload reports (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: pltr_reports_${{ github.run_id }}
+          path: |
+            ${{ steps.latest.outputs.latest_dir }}/final_report.html
+            ${{ steps.latest.outputs.latest_dir }}/final_report.json
+            ${{ steps.latest.outputs.latest_dir }}/status.txt
+            ${{ steps.latest.outputs.latest_dir }}/BacktestAgent/metrics.json
+            ${{ steps.latest.outputs.latest_dir }}/BacktestAgent/sanity_tests.json
+          if-no-files-found: error
