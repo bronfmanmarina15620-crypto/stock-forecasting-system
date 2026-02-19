@@ -51,6 +51,18 @@ jobs:
             ${{ steps.latest.outputs.latest_dir }}/BacktestAgent/sanity_tests.json
           if-no-files-found: error
 
+      - name: Notify Telegram on success
+        if: ${{ success() }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          TEXT="✅ ${TICKER} nightly run SUCCEEDED"$'\n'"Run: ${RUN_URL}"
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${TEXT}" || true
+
       - name: Notify Telegram on failure
         if: ${{ failure() }}
         env:
