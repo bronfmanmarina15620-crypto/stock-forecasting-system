@@ -160,8 +160,22 @@ def compute_ma150_atr_strategy(
                 )
         else:
             # Not in position - build reason for why we don't enter
+            rmp_nan = pd.isna(rolling_max_prev.iloc[i])
             if pd.isna(m) or pd.isna(s) or pd.isna(a):
-                day_reasons.append("No entry: insufficient data (warmup period)")
+                missing = []
+                if pd.isna(m):
+                    missing.append("MA150")
+                if pd.isna(s):
+                    missing.append(f"slope(lookback={slope_lookback})")
+                if pd.isna(a):
+                    missing.append(f"ATR({atr_length})")
+                day_reasons.append(
+                    f"Insufficient history: {', '.join(missing)} not ready"
+                )
+            elif rmp_nan:
+                day_reasons.append(
+                    f"Insufficient history: entry_lookback={entry_lookback}"
+                )
             elif rhv:
                 ap = float(atr_pct.iloc[i]) if not pd.isna(atr_pct.iloc[i]) else 0.0
                 day_reasons.append(
