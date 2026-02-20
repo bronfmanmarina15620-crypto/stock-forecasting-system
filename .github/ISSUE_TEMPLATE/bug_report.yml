@@ -1,0 +1,31 @@
+name: Bug Report
+description: Report a bug in the pipeline or validation
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Commands or actions to trigger the bug
+      placeholder: |
+        1. Run `python run.py --ticker PLTR`
+        2. Run `python validate_run.py --run runs/PLTR/<RUN_ID>`
+        3. See error...
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / error output
+      description: Paste relevant log output
+      render: shell
