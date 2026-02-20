@@ -42,6 +42,11 @@ python run.py --ticker PLTR --config my_config.json
 python validate_run.py --run runs/PLTR/20240214_120000_abc123
 ```
 
+### Release Tags
+
+- `v0.4.0-phase4-risk` — Phase 4 risk sizing integration (risk_explain.json + Phase 4 metrics + dashboard + validate_run)
+- `v0.4.1-phase4-hardening` — post-release hardening (README docs + schema guard tests + changelog)
+
 ## 📁 Project Structure
 
 ```
