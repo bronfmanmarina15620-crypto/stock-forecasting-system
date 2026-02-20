@@ -10,6 +10,7 @@ import pandas as pd
 import pytest
 
 import importlib
+import inspect
 import sys
 import os
 
@@ -18,6 +19,7 @@ _mod = importlib.import_module("agents.backtest_agent")
 REQUIRED_PNL_COLS = _mod.REQUIRED_PNL_COLS
 REQUIRED_TRADES_COLS = _mod.REQUIRED_TRADES_COLS
 REQUIRED_METRICS_KEYS = _mod.REQUIRED_METRICS_KEYS
+_STUB_ML_METRICS = _mod._STUB_ML_METRICS
 
 
 # ---------------------------------------------------------------------------
@@ -367,3 +369,85 @@ class TestSchemaLocks:
         assert "sharpe" in REQUIRED_METRICS_KEYS
         assert "days_regime_ok_pct" in REQUIRED_METRICS_KEYS
         assert "total_costs" in REQUIRED_METRICS_KEYS
+
+
+# ---------------------------------------------------------------------------
+# Tests: Phase 3 hardening — ML regression prevention
+# ---------------------------------------------------------------------------
+
+
+class TestBacktestModeGuardrails:
+    """Verify signals_only is default and ML code is unreachable in that mode."""
+
+    def test_default_mode_is_signals_only(self):
+        """BacktestConfig.backtest_mode must default to 'signals_only'."""
+        _cfg = importlib.import_module("config")
+        cfg = _cfg.BacktestConfig()
+        assert cfg.backtest_mode == "signals_only"
+
+    def test_signals_only_no_module_level_sklearn_import(self):
+        """backtest_agent.py must NOT import sklearn/pickle at module level.
+
+        Module-level imports would force sklearn into sys.modules for ALL
+        modes, defeating the purpose of the signals_only gate.
+        """
+        source = inspect.getsource(_mod)
+        # Check top-level imports (before class def) don't contain sklearn/pickle
+        lines_before_class = source.split("class BacktestAgent")[0]
+        for line in lines_before_class.splitlines():
+            stripped = line.strip()
+            # Skip comments and docstrings
+            if stripped.startswith("#") or stripped.startswith('"""') or stripped.startswith("'"):
+                continue
+            assert "import pickle" not in stripped, \
+                "Module-level 'import pickle' found — must be lazy inside legacy_ml"
+            assert "from sklearn" not in stripped, \
+                "Module-level 'from sklearn' found — must be lazy inside legacy_ml"
+            assert "import sklearn" not in stripped, \
+                "Module-level 'import sklearn' found — must be lazy inside legacy_ml"
+
+    def test_signals_only_method_exists(self):
+        """BacktestAgent must have _run_signals_only method."""
+        assert hasattr(_mod.BacktestAgent, '_run_signals_only')
+
+    def test_legacy_ml_method_exists(self):
+        """BacktestAgent must have _run_legacy_ml method."""
+        assert hasattr(_mod.BacktestAgent, '_run_legacy_ml')
+
+    def test_run_dispatches_on_mode(self):
+        """run() must read backtest_mode and dispatch."""
+        source = inspect.getsource(_mod.BacktestAgent.run)
+        assert "backtest_mode" in source
+        assert "_run_signals_only" in source
+        assert "_run_legacy_ml" in source
+
+    def test_stub_ml_metrics_has_required_keys(self):
+        """_STUB_ML_METRICS must provide numeric defaults for dashboard."""
+        overall = _STUB_ML_METRICS['overall']
+        assert 'auc' in overall
+        assert 'brier_score' in overall
+        assert 'base_rate' in overall
+        assert 'total_samples' in overall
+        # Must be numeric (not string "N/A") so formatters don't crash
+        assert isinstance(overall['auc'], (int, float))
+        assert isinstance(overall['brier_score'], (int, float))
+
+    def test_metrics_schema_phase3_top_level_keys_present(self):
+        """Phase 3 top-level metrics must be present with stub ML metrics."""
+        agent = _AgentStub()
+        n = 50
+        signals = _make_strategy_signals(n, entries=[10], exits=[20])
+        close = _make_close(n, start=100.0, step=1.0)
+        trades = agent._build_strategy_trades(signals, close)
+        pnl = agent._build_strategy_pnl(signals, close)
+
+        # Use stub (signals_only) ML metrics
+        metrics = agent._calculate_strategy_metrics(
+            signals, close, trades, pnl, _STUB_ML_METRICS
+        )
+
+        for key in REQUIRED_METRICS_KEYS:
+            assert key in metrics, f"Missing Phase 3 key with stub ML: {key}"
+
+        # overall must be the stub
+        assert metrics['overall'] == _STUB_ML_METRICS['overall']
