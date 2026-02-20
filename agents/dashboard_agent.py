@@ -89,7 +89,7 @@ class DashboardAgent(BaseAgent):
         decision_action = decision_output["decision_action"]
         portfolio_plan = portfolio_output["portfolio_plan"]
         risk_summary = portfolio_output["risk_summary"]
-        metrics = backtest_output["metrics"]["overall"]
+        ml_overall = backtest_output.get("metrics", {}).get("overall", {})
 
         # Phase 2 strategy fields
         ma150_trend_ok = decision_action.get("ma150_trend_ok", False)
@@ -279,15 +279,15 @@ class DashboardAgent(BaseAgent):
         <div class="card">
             <div class="metric">
                 <span class="metric-label">AUC:</span>
-                <span class="metric-value">{metrics['auc']:.3f}</span>
+                <span class="metric-value">{ml_overall.get('auc', 'N/A')}</span>
             </div>
             <div class="metric">
                 <span class="metric-label">Base Rate:</span>
-                <span class="metric-value">{metrics['base_rate']:.1%}</span>
+                <span class="metric-value">{ml_overall.get('base_rate', 'N/A')}</span>
             </div>
             <div class="metric">
                 <span class="metric-label">Total Samples:</span>
-                <span class="metric-value">{metrics['total_samples']}</span>
+                <span class="metric-value">{ml_overall.get('total_samples', 'N/A')}</span>
             </div>
         </div>
 
