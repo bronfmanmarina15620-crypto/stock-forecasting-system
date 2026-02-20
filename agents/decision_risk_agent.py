@@ -21,6 +21,36 @@ from typing import Dict, Any
 from .base_agent import BaseAgent
 from determinism import content_hash_sha256
 
+_VALID_ACTIONS = {"ENTER", "ABSTAIN"}
+
+
+def _validate_decision_action(decision: Dict[str, Any]) -> None:
+    """Validate decision_action invariants for Phase 2.
+
+    Raises ValueError on any violation:
+    - action must be ENTER or ABSTAIN (long-only, no EXIT/UNKNOWN)
+    - ENTER requires position == 1
+    - ABSTAIN requires non-empty "because" list
+    """
+    action = decision.get("action")
+    if action not in _VALID_ACTIONS:
+        raise ValueError(
+            f"decision_action invalid action: '{action}'. "
+            f"Must be one of {_VALID_ACTIONS}"
+        )
+    if action == "ENTER":
+        if decision.get("position") != 1:
+            raise ValueError(
+                f"decision_action ENTER requires position=1, "
+                f"got position={decision.get('position')}"
+            )
+    if action == "ABSTAIN":
+        because = decision.get("because", [])
+        if not because:
+            raise ValueError(
+                "decision_action ABSTAIN requires non-empty 'because' list"
+            )
+
 
 class DecisionRiskAgent(BaseAgent):
     """Agent responsible for decision making and risk assessment."""
@@ -87,6 +117,9 @@ class DecisionRiskAgent(BaseAgent):
 
             # Generate abstain stats
             abstain_stats = self._generate_abstain_stats(signals, decision_explain)
+
+            # Validate decision invariants before persisting
+            _validate_decision_action(decision_action)
 
             # Embed deterministic content fingerprint
             decision_action["content_hash_sha256"] = content_hash_sha256(
