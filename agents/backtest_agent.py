@@ -1,8 +1,10 @@
 """
-BacktestAgent - Walk-forward ML validation + Phase 3 strategy evaluation.
+BacktestAgent - Phase 3 strategy evaluation (default) + optional ML walk-forward.
 
-Phase 3: Consumes StrategyAgent/strategy_signals.parquet as the SINGLE
-source of truth for trade execution.  ML walk-forward is retained for
+Phase 3 (signals_only, DEFAULT): Consumes StrategyAgent/strategy_signals.parquet
+as the SINGLE source of truth for trade execution.  No ML imports or execution.
+
+Legacy ML (legacy_ml, opt-in): Retains walk-forward ML validation for
 predictions_oos.parquet and sanity_tests.json (backward compat).
 """
 
@@ -11,9 +13,6 @@ import os
 import pandas as pd
 import numpy as np
 from typing import Dict, Any, Optional
-import pickle
-from sklearn.metrics import roc_auc_score, brier_score_loss
-from sklearn.linear_model import LogisticRegression
 from .base_agent import BaseAgent
 from determinism import content_hash_sha256
 
@@ -39,18 +38,127 @@ REQUIRED_METRICS_KEYS = [
     "total_costs", "costs_per_trade_avg",
 ]
 
+# Stub ML metrics for signals_only mode (numeric defaults so formatters work)
+_STUB_ML_METRICS = {
+    'overall': {
+        'auc': 0.5,
+        'brier_score': 0.5,
+        'base_rate': 0.0,
+        'total_samples': 0,
+    }
+}
+
 
 class BacktestAgent(BaseAgent):
-    """Walk-forward backtesting with Phase 3 strategy evaluation."""
+    """Phase 3 strategy backtesting with optional ML walk-forward."""
 
     def run(self) -> Dict[str, Any]:
-        """Run ML walk-forward + Phase 3 strategy backtest."""
-        self.logger.info("Starting walk-forward backtest")
+        """Run backtest in configured mode (signals_only | legacy_ml)."""
+        mode = getattr(self.config.backtest, 'backtest_mode', 'signals_only')
+        self.logger.info(f"Backtest mode: {mode}")
+
+        if mode == 'signals_only':
+            return self._run_signals_only()
+        elif mode == 'legacy_ml':
+            return self._run_legacy_ml()
+        else:
+            raise ValueError(
+                f"Unknown backtest_mode: '{mode}'. "
+                f"Must be 'signals_only' or 'legacy_ml'."
+            )
+
+    # ==================================================================
+    # signals_only mode (Phase 3 default)
+    # ==================================================================
+
+    def _run_signals_only(self) -> Dict[str, Any]:
+        """Phase 3 signal-driven backtest.  No ML imports or execution.
+
+        Design invariant: this method (and everything it calls) must NEVER
+        import or invoke sklearn / pickle / ML model code.  Enforced by
+        test_signals_only_does_not_import_or_run_legacy_ml.
+        """
+        self.logger.info("Running signals_only backtest (no ML)")
 
         try:
-            # ==============================================================
-            # ML walk-forward (backward compat: predictions_oos, sanity)
-            # ==============================================================
+            data_output = self.load_agent_output('DataAgent')
+
+            strategy_signals = pd.read_parquet(
+                os.path.join(self.run_dir, 'StrategyAgent',
+                             'strategy_signals.parquet')
+            )
+            close = pd.read_parquet(data_output['data_path'])['Close']
+
+            trades = self._build_strategy_trades(strategy_signals, close)
+            pnl_series = self._build_strategy_pnl(strategy_signals, close)
+            metrics = self._calculate_strategy_metrics(
+                strategy_signals, close, trades, pnl_series, _STUB_ML_METRICS
+            )
+
+            metrics['content_hash_sha256'] = content_hash_sha256(metrics)
+            costs_assumptions = self._generate_costs_assumptions()
+
+            # Stub ML artifacts for backward compat (DecisionRiskAgent, validate_run)
+            stub_predictions = pd.DataFrame(
+                columns=['date', 'y_true', 'y_pred_proba', 'regime', 'price']
+            )
+            stub_sanity = {
+                'shuffled_labels_auc': 0.50,
+                'future_shift_auc': 0.50,
+                'status': 'SKIPPED',
+                'reason': 'signals_only mode: ML sanity tests not applicable',
+            }
+
+            self.save_artifact('predictions_oos.parquet', stub_predictions)
+            self.save_artifact('sanity_tests.json', stub_sanity)
+            self.save_artifact('costs_assumptions.json', costs_assumptions)
+            self.save_artifact('trades.parquet', trades)
+            self.save_artifact('pnl_series.parquet', pnl_series)
+            self.save_artifact('metrics.json', metrics)
+            self.save_artifact(
+                'backtest_report.html',
+                self._generate_backtest_html(metrics, stub_sanity),
+            )
+
+            last_trade_summary = None
+            if len(trades) > 0:
+                last_trade_summary = trades.iloc[-1].to_dict()
+
+            output = {
+                'status': 'SUCCESS',
+                'predictions_path': self.get_artifact_path(
+                    'predictions_oos.parquet'),
+                'metrics': metrics,
+                'last_trade_summary': last_trade_summary,
+            }
+
+            self.save_output(output)
+            n_trades = len(trades)
+            total_ret = metrics.get('total_return', 0)
+            self.logger.info(
+                f"Backtest complete (signals_only): {n_trades} trades, "
+                f"total_return={total_ret:.2%}"
+            )
+            return output
+
+        except Exception as e:
+            self.logger.error(f"Backtest failed: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {'status': 'FAILED', 'error': str(e)}
+
+    # ==================================================================
+    # legacy_ml mode (opt-in backward compat)
+    # ==================================================================
+
+    def _run_legacy_ml(self) -> Dict[str, Any]:
+        """Walk-forward ML validation + Phase 3 strategy backtest."""
+        self.logger.info("Running legacy_ml backtest (ML walk-forward enabled)")
+
+        import pickle  # lazy: only in legacy_ml
+
+        try:
+            # ML walk-forward
             model_output = self.load_agent_output('EventModelAgent')
             regime_output = self.load_agent_output('RegimeAgent')
             data_output = self.load_agent_output('DataAgent')
@@ -72,9 +180,7 @@ class BacktestAgent(BaseAgent):
             self.save_artifact('sanity_tests.json', sanity_results)
             self.save_artifact('costs_assumptions.json', costs_assumptions)
 
-            # ==============================================================
-            # Phase 3: Strategy-based backtest (source of truth)
-            # ==============================================================
+            # Phase 3: Strategy-based backtest
             strategy_signals = pd.read_parquet(
                 os.path.join(self.run_dir, 'StrategyAgent',
                              'strategy_signals.parquet')
@@ -97,7 +203,6 @@ class BacktestAgent(BaseAgent):
                 self._generate_backtest_html(metrics, sanity_results),
             )
 
-            # Last trade summary for dashboard
             last_trade_summary = None
             if len(trades) > 0:
                 last_trade_summary = trades.iloc[-1].to_dict()
@@ -114,7 +219,7 @@ class BacktestAgent(BaseAgent):
             n_trades = len(trades)
             total_ret = metrics.get('total_return', 0)
             self.logger.info(
-                f"Backtest complete: {n_trades} trades, "
+                f"Backtest complete (legacy_ml): {n_trades} trades, "
                 f"total_return={total_ret:.2%}"
             )
             return output
@@ -126,7 +231,7 @@ class BacktestAgent(BaseAgent):
             return {'status': 'FAILED', 'error': str(e)}
 
     # ------------------------------------------------------------------
-    # ML walk-forward (backward compat)
+    # ML walk-forward (legacy_ml only)
     # ------------------------------------------------------------------
 
     def _simple_backtest(self, model, features, regimes, prices):
@@ -201,6 +306,8 @@ class BacktestAgent(BaseAgent):
         self, predictions: pd.DataFrame
     ) -> Dict[str, Any]:
         """Calculate ML-only metrics (AUC, Brier) for backward compat."""
+        from sklearn.metrics import roc_auc_score, brier_score_loss  # lazy
+
         if len(predictions) == 0:
             return {
                 'overall': {
@@ -472,13 +579,16 @@ class BacktestAgent(BaseAgent):
         }
 
     def _run_sanity_tests(self, features, prices, regimes) -> Dict[str, Any]:
-        """Run leakage detection sanity tests.
+        """Run leakage detection sanity tests (legacy_ml only).
 
         Test 1 (shuffled labels): Average over N shuffles to reduce noise.
                 Train on shuffled labels -> predict test -> AUC should be ~0.50.
         Test 2 (future shift): Shift labels by a large window (60 days) to break
                 any temporal autocorrelation in features/labels.
         """
+        from sklearn.metrics import roc_auc_score  # lazy: only in legacy_ml
+        from sklearn.linear_model import LogisticRegression  # lazy
+
         forward_window = self.config.event.forward_window
         threshold = self.config.event.threshold_pct / 100.0
 

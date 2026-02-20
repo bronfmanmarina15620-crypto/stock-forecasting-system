@@ -226,14 +226,21 @@ class DecisionRiskAgent(BaseAgent):
             "strategy_return"
         ]
         ev_per_signal = float(enter_returns.mean()) if len(enter_returns) > 0 else 0.0
-        max_dd = float(strategy_pnl["drawdown"].min())
-
-        signals["date"] = pd.to_datetime(signals["date"])
-        signals_per_month = (
-            signals.groupby(signals["date"].dt.to_period("M"))["action"]
-            .apply(lambda x: (x == "ENTER").sum())
-            .mean()
+        max_dd = (
+            float(strategy_pnl["drawdown"].min())
+            if len(strategy_pnl) > 0 else 0.0
         )
+
+        if total_days > 0:
+            signals["date"] = pd.to_datetime(signals["date"])
+            signals_per_month = float(
+                signals.groupby(signals["date"].dt.to_period("M"))["action"]
+                .apply(lambda x: (x == "ENTER").sum())
+                .mean()
+            )
+        else:
+            signals_per_month = 0.0
+
         win_rate = (
             float((enter_returns > 0).mean()) if len(enter_returns) > 0 else 0.0
         )
@@ -242,7 +249,7 @@ class DecisionRiskAgent(BaseAgent):
             "total_days": total_days,
             "enter_days": enter_days,
             "abstain_days": abstain_days,
-            "abstain_percentage": float(abstain_days / total_days * 100),
+            "abstain_percentage": float(abstain_days / total_days * 100) if total_days > 0 else 100.0,
             "signals_per_month": float(signals_per_month),
             "expected_value_per_signal": ev_per_signal,
             "max_drawdown": max_dd,

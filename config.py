@@ -65,6 +65,7 @@ class BacktestConfig:
     spread_bps: float = 2.0  # 2 basis points
     slippage_bps: float = 3.0  # 3 basis points
     execution_assumption: str = "eod"  # eod, open
+    backtest_mode: str = "signals_only"  # "signals_only" (default) or "legacy_ml"
 
 
 @dataclass
