@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- CI: add smoke-run job (`scripts/ci_smoke_run.sh`) + `validate_run` gate on PRs
+- CLI: `run.py` adds `--lookback-days` and `--min-bars` optional flags
+- Repo: add LICENSE, SECURITY.md, CODE_OF_CONDUCT.md, CONTRIBUTING.md
+- Repo: add PR/issue templates, Dependabot, release workflow scaffold
+- Repo: harden `.gitignore` (`.env`, `secrets.*`)
+
 ## v0.4.1-phase4-hardening (2026-02-20)
 
 - Docs: document Phase 4 risk sizing outputs in README (config table, artifact paths, 7 trades columns, 9 metric keys, run/validate commands)
