@@ -117,18 +117,19 @@ class MemoryLearningAgent(BaseAgent):
         backtest_output = kwargs['backtest_output']
         
         decision_stats = decision_output['decision_stats']
-        metrics = backtest_output['metrics']['overall']
-        
+        bt_metrics = backtest_output.get('metrics', {})
+        legacy_ml = bt_metrics.get('legacy_ml', {})
+
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-        
+
         cursor.execute("""
             INSERT OR REPLACE INTO runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             os.path.basename(self.run_dir),  # run_id
             self.config.ticker,
             datetime.now().isoformat(),
-            metrics['auc'],
+            legacy_ml.get('auc', 0.5),
             decision_stats['max_drawdown'],
             decision_stats['expected_value_per_signal'],
             decision_stats['signals_per_month'],
