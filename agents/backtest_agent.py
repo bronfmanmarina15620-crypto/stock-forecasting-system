@@ -40,7 +40,8 @@ REQUIRED_METRICS_KEYS = [
     "days_abstain_pct", "breakout_entry_count",
     # Costs
     "total_costs", "costs_per_trade_avg",
-    # Phase 4 risk
+]
+PHASE4_METRICS_KEYS = [
     "avg_exposure_pct", "max_exposure_pct",
     "avg_r_multiple", "median_r_multiple",
     "worst_r_multiple", "best_r_multiple",
