@@ -451,3 +451,144 @@ class TestBacktestModeGuardrails:
 
         # legacy_ml must be the stub
         assert metrics['legacy_ml'] == _STUB_ML_METRICS['legacy_ml']
+
+
+# ---------------------------------------------------------------------------
+# Tests: Legacy ML stub isolation (STEP 3)
+# ---------------------------------------------------------------------------
+
+
+class TestLegacyMlStubIsolation:
+    """Verify legacy_ml stubs are isolated under BacktestAgent/legacy_ml/
+    and are optional when emit_legacy_stubs=False.
+    """
+
+    def setup_method(self):
+        self.agent = _AgentStub()
+
+    # -- Test 1: Default emits stubs under legacy_ml/, NOT at top level --
+
+    def test_default_stubs_path_is_legacy_ml_subfolder(self):
+        """_run_signals_only must save stubs to legacy_ml/ sub-path."""
+        source = inspect.getsource(_mod.BacktestAgent._run_signals_only)
+        # Must create legacy_ml subfolder
+        assert "legacy_ml" in source
+        assert "os.makedirs" in source
+        # Stubs saved to legacy_ml/ paths
+        assert "legacy_ml/predictions_oos.parquet" in source
+        assert "legacy_ml/sanity_tests.json" in source
+
+    def test_stubs_not_at_top_level_in_signals_only(self):
+        """_run_signals_only must NOT save predictions_oos or sanity_tests
+        at agent top level (only in legacy_ml/ subfolder).
+        """
+        source = inspect.getsource(_mod.BacktestAgent._run_signals_only)
+        # Find all save_artifact calls
+        lines = source.splitlines()
+        for line in lines:
+            stripped = line.strip()
+            if "save_artifact" in stripped and "predictions_oos" in stripped:
+                # Must reference legacy_ml/ path
+                assert "legacy_ml/" in stripped, (
+                    f"predictions_oos saved outside legacy_ml/: {stripped}"
+                )
+            if "save_artifact" in stripped and "sanity_tests" in stripped:
+                assert "legacy_ml/" in stripped, (
+                    f"sanity_tests saved outside legacy_ml/: {stripped}"
+                )
+
+    # -- Test 2: emit_legacy_stubs=False → no legacy_ml artifacts --
+
+    def test_emit_stubs_false_skips_legacy_ml_creation(self):
+        """When emit_legacy_stubs=False, no legacy_ml dir/artifacts are created.
+
+        Verified by checking that stubs are gated behind emit_stubs flag.
+        """
+        source = inspect.getsource(_mod.BacktestAgent._run_signals_only)
+        # The emit_stubs flag must gate stub creation
+        assert "emit_legacy_stubs" in source
+        assert "emit_stubs" in source
+        # os.makedirs for legacy_ml must be inside the emit_stubs block
+        assert "if emit_stubs:" in source
+
+    def test_emit_stubs_false_metrics_no_legacy_ml_key(self):
+        """With empty ml_metrics (emit_stubs=False), metrics has no legacy_ml."""
+        n = 50
+        signals = _make_strategy_signals(n, entries=[10], exits=[20])
+        close = _make_close(n, start=100.0, step=1.0)
+        trades = self.agent._build_strategy_trades(signals, close)
+        pnl = self.agent._build_strategy_pnl(signals, close)
+
+        # Simulate emit_legacy_stubs=False: pass empty ml_metrics
+        metrics = self.agent._calculate_strategy_metrics(
+            signals, close, trades, pnl, {}
+        )
+
+        assert 'legacy_ml' not in metrics
+
+    # -- Test 3: Phase 3 keys always at top level; legacy_ml optional --
+
+    def test_phase3_keys_present_with_stubs(self):
+        """Phase 3 required keys must be at top level when stubs are emitted."""
+        n = 50
+        signals = _make_strategy_signals(n, entries=[10], exits=[20])
+        close = _make_close(n, start=100.0, step=1.0)
+        trades = self.agent._build_strategy_trades(signals, close)
+        pnl = self.agent._build_strategy_pnl(signals, close)
+
+        metrics = self.agent._calculate_strategy_metrics(
+            signals, close, trades, pnl, _STUB_ML_METRICS
+        )
+
+        for key in REQUIRED_METRICS_KEYS:
+            assert key in metrics, f"Missing Phase 3 key: {key}"
+        # legacy_ml is an extra nested key, not in REQUIRED_METRICS_KEYS
+        assert 'legacy_ml' in metrics
+
+    def test_phase3_keys_present_without_stubs(self):
+        """Phase 3 required keys must be at top level even without stubs."""
+        n = 50
+        signals = _make_strategy_signals(n, entries=[10], exits=[20])
+        close = _make_close(n, start=100.0, step=1.0)
+        trades = self.agent._build_strategy_trades(signals, close)
+        pnl = self.agent._build_strategy_pnl(signals, close)
+
+        metrics = self.agent._calculate_strategy_metrics(
+            signals, close, trades, pnl, {}
+        )
+
+        for key in REQUIRED_METRICS_KEYS:
+            assert key in metrics, f"Missing Phase 3 key without stubs: {key}"
+
+    def test_legacy_ml_not_in_required_metrics_keys(self):
+        """'legacy_ml' and 'overall' must NOT be in REQUIRED_METRICS_KEYS."""
+        assert 'legacy_ml' not in REQUIRED_METRICS_KEYS
+        assert 'overall' not in REQUIRED_METRICS_KEYS
+
+    # -- Test 4: validate_run does not require legacy_ml --
+
+    def test_validate_run_required_artifacts_no_legacy_ml(self):
+        """REQUIRED_ARTIFACTS['BacktestAgent'] must NOT contain legacy ML files."""
+        _vr = importlib.import_module("validate_run")
+        bt_artifacts = _vr.REQUIRED_ARTIFACTS["BacktestAgent"]
+
+        assert "predictions_oos.parquet" not in bt_artifacts
+        assert "sanity_tests.json" not in bt_artifacts
+        # Phase 3 artifacts must be present
+        assert "metrics.json" in bt_artifacts
+        assert "trades.parquet" in bt_artifacts
+        assert "pnl_series.parquet" in bt_artifacts
+        assert "costs_assumptions.json" in bt_artifacts
+
+    def test_validate_run_metrics_fields_no_overall(self):
+        """REQUIRED_METRICS_FIELDS must not reference 'overall' or 'legacy_ml'."""
+        _vr = importlib.import_module("validate_run")
+        for field in _vr.REQUIRED_METRICS_FIELDS:
+            assert "overall" not in field.lower(), f"Unexpected 'overall' in: {field}"
+            assert "legacy_ml" not in field.lower(), f"Unexpected 'legacy_ml' in: {field}"
+
+    def test_emit_legacy_stubs_config_default(self):
+        """BacktestConfig.emit_legacy_stubs must default to True."""
+        _cfg = importlib.import_module("config")
+        cfg = _cfg.BacktestConfig()
+        assert cfg.emit_legacy_stubs is True
