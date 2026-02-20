@@ -59,7 +59,7 @@ class BacktestConfig:
     test_window_days: int = 63  # ~3 months
     step_days: int = 21  # ~1 month
     min_test_samples: int = 20
-    
+
     # Trading frictions
     commission_pct: float = 0.001  # 0.1% per trade
     spread_bps: float = 2.0  # 2 basis points
@@ -67,6 +67,13 @@ class BacktestConfig:
     execution_assumption: str = "eod"  # eod, open
     backtest_mode: str = "signals_only"  # "signals_only" (default) or "legacy_ml"
     emit_legacy_stubs: bool = True  # emit stub ML artifacts under legacy_ml/
+
+    # Phase 4 risk management
+    capital_base: float = 100000.0       # starting equity for backtest
+    max_leverage: float = 1.0            # long-only; exposure <= 1.0 * equity
+    max_position_pct: float = 0.25       # cap position notional to 25% equity
+    min_stop_pct: float = 0.01           # avoid absurdly tiny stops (1% of price)
+    max_stop_pct: float = 0.20           # avoid absurdly wide stops (20% of price)
 
 
 @dataclass
