@@ -1158,6 +1158,15 @@ class BacktestAgent(BaseAgent):
   <li>Total Costs: {metrics.get('total_costs', 0):.4%}</li>
   <li>Cost per Trade (round-trip): {metrics.get('costs_per_trade_avg', 0):.4%}</li>
 </ul>
+<h2>Risk Management (Phase 4)</h2>
+<ul>
+  <li>Avg Exposure: {metrics.get('avg_exposure_pct', 0):.2%}</li>
+  <li>Max Exposure: {metrics.get('max_exposure_pct', 0):.2%}</li>
+  <li>Avg R-Multiple: {metrics.get('avg_r_multiple', 0):.2f}</li>
+  <li>Median R-Multiple: {metrics.get('median_r_multiple', 0):.2f}</li>
+  <li>Worst R-Multiple: {metrics.get('worst_r_multiple', 0):.2f}</li>
+  <li>Best R-Multiple: {metrics.get('best_r_multiple', 0):.2f}</li>
+</ul>
 <h2>ML Validation (backward compat)</h2>
 <ul>
   <li>AUC: {overall.get('auc', 'N/A')}</li>

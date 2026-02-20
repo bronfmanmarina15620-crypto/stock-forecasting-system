@@ -37,6 +37,7 @@ REQUIRED_ARTIFACTS = {
         "pnl_series.parquet",
         "metrics.json",
         "costs_assumptions.json",
+        "risk_explain.json",
     ],
     "DecisionRiskAgent": [
         "signals.csv",
@@ -68,6 +69,10 @@ REQUIRED_METRICS_FIELDS = [
     "num_trades",
     "days_regime_ok_pct",
     "days_range_high_vol_pct",
+    # Phase 4 risk
+    "avg_exposure_pct",
+    "avg_r_multiple",
+    "worst_r_multiple",
 ]
 
 REQUIRED_ABSTAIN_STATS_FIELDS = [

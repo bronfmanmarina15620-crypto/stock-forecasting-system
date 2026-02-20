@@ -275,6 +275,30 @@ class DashboardAgent(BaseAgent):
             </div>
         </div>
 
+        <h2>Risk Management (Phase 4)</h2>
+        <div class="card">
+            <div class="metric">
+                <span class="metric-label">Avg Exposure:</span>
+                <span class="metric-value">{bt_metrics.get('avg_exposure_pct', 0):.2%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Max Exposure:</span>
+                <span class="metric-value">{bt_metrics.get('max_exposure_pct', 0):.2%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Avg R-Multiple:</span>
+                <span class="metric-value">{bt_metrics.get('avg_r_multiple', 0):.2f}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Worst R-Multiple:</span>
+                <span class="metric-value">{bt_metrics.get('worst_r_multiple', 0):.2f}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Best R-Multiple:</span>
+                <span class="metric-value">{bt_metrics.get('best_r_multiple', 0):.2f}</span>
+            </div>
+        </div>
+
         <h2>ML Validation</h2>
         <div class="card">
             <div class="metric">
@@ -416,6 +440,10 @@ class DashboardAgent(BaseAgent):
                     "days_range_high_vol_pct"),
                 "last_trade_summary": backtest_output.get(
                     "last_trade_summary"),
+                # Phase 4 risk
+                "avg_exposure_pct": bt_metrics.get("avg_exposure_pct"),
+                "avg_r_multiple": bt_metrics.get("avg_r_multiple"),
+                "worst_r_multiple": bt_metrics.get("worst_r_multiple"),
             },
         }
 
