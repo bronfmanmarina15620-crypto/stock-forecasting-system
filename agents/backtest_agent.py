@@ -1,32 +1,61 @@
 """
-BacktestAgent - Walk-forward backtesting with full artifact production.
+BacktestAgent - Walk-forward ML validation + Phase 3 strategy evaluation.
+
+Phase 3: Consumes StrategyAgent/strategy_signals.parquet as the SINGLE
+source of truth for trade execution.  ML walk-forward is retained for
+predictions_oos.parquet and sanity_tests.json (backward compat).
 """
+
+import os
 
 import pandas as pd
 import numpy as np
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import pickle
 from sklearn.metrics import roc_auc_score, brier_score_loss
 from sklearn.linear_model import LogisticRegression
 from .base_agent import BaseAgent
 from determinism import content_hash_sha256
 
+# Phase 3 schema locks
+REQUIRED_PNL_COLS = ["date", "equity_curve", "daily_return", "position"]
+REQUIRED_TRADES_COLS = [
+    "entry_date", "entry_price", "exit_date", "exit_price",
+    "pnl", "return", "holding_days",
+]
+REQUIRED_METRICS_KEYS = [
+    # Backward compat
+    "overall", "EV_per_trade", "max_drawdown", "win_rate",
+    "avg_trades_per_month", "total_signals",
+    # Phase 3 performance
+    "total_return", "cagr", "volatility", "sharpe", "exposure_time_pct",
+    # Phase 3 trade stats
+    "num_trades", "avg_trade_return", "median_trade_return",
+    "profit_factor", "avg_holding_days",
+    # Regime diagnostics
+    "days_regime_ok_pct", "days_range_high_vol_pct",
+    "days_abstain_pct", "breakout_entry_count",
+    # Costs
+    "total_costs", "costs_per_trade_avg",
+]
+
 
 class BacktestAgent(BaseAgent):
-    """Walk-forward backtesting with realistic costs and sanity checks."""
+    """Walk-forward backtesting with Phase 3 strategy evaluation."""
 
     def run(self) -> Dict[str, Any]:
-        """Run walk-forward backtest."""
+        """Run ML walk-forward + Phase 3 strategy backtest."""
         self.logger.info("Starting walk-forward backtest")
 
         try:
-            # Load dependencies
+            # ==============================================================
+            # ML walk-forward (backward compat: predictions_oos, sanity)
+            # ==============================================================
             model_output = self.load_agent_output('EventModelAgent')
             regime_output = self.load_agent_output('RegimeAgent')
             data_output = self.load_agent_output('DataAgent')
             feature_output = self.load_agent_output('FeatureAgent')
 
-            # Load data
             with open(model_output['model_path'], 'rb') as f:
                 model = pickle.load(f)
 
@@ -34,45 +63,60 @@ class BacktestAgent(BaseAgent):
             regimes = pd.read_parquet(regime_output['regime_path'])['regime']
             prices = pd.read_parquet(data_output['data_path'])['Close']
 
-            # Run backtest
             predictions = self._simple_backtest(model, features, regimes, prices)
-
-            # Calculate metrics
-            metrics = self._calculate_metrics(predictions)
-
-            # Generate trades from predictions
-            trades = self._generate_trades(predictions)
-
-            # Generate PnL series
-            pnl_series = self._generate_pnl_series(predictions)
-
-            # Generate costs assumptions
+            ml_metrics = self._calculate_ml_metrics(predictions)
+            sanity_results = self._run_sanity_tests(features, prices, regimes)
             costs_assumptions = self._generate_costs_assumptions()
 
-            # Run sanity tests
-            sanity_results = self._run_sanity_tests(features, prices, regimes)
+            self.save_artifact('predictions_oos.parquet', predictions)
+            self.save_artifact('sanity_tests.json', sanity_results)
+            self.save_artifact('costs_assumptions.json', costs_assumptions)
 
-            # Embed deterministic content fingerprint
+            # ==============================================================
+            # Phase 3: Strategy-based backtest (source of truth)
+            # ==============================================================
+            strategy_signals = pd.read_parquet(
+                os.path.join(self.run_dir, 'StrategyAgent',
+                             'strategy_signals.parquet')
+            )
+            close = pd.read_parquet(data_output['data_path'])['Close']
+
+            trades = self._build_strategy_trades(strategy_signals, close)
+            pnl_series = self._build_strategy_pnl(strategy_signals, close)
+            metrics = self._calculate_strategy_metrics(
+                strategy_signals, close, trades, pnl_series, ml_metrics
+            )
+
             metrics['content_hash_sha256'] = content_hash_sha256(metrics)
 
-            # Save all required artifacts
-            self.save_artifact('predictions_oos.parquet', predictions)
-            self.save_artifact('metrics.json', metrics)
             self.save_artifact('trades.parquet', trades)
             self.save_artifact('pnl_series.parquet', pnl_series)
-            self.save_artifact('costs_assumptions.json', costs_assumptions)
-            self.save_artifact('sanity_tests.json', sanity_results)
-            self.save_artifact('backtest_report.html',
-                               self._generate_backtest_html(metrics, sanity_results))
+            self.save_artifact('metrics.json', metrics)
+            self.save_artifact(
+                'backtest_report.html',
+                self._generate_backtest_html(metrics, sanity_results),
+            )
+
+            # Last trade summary for dashboard
+            last_trade_summary = None
+            if len(trades) > 0:
+                last_trade_summary = trades.iloc[-1].to_dict()
 
             output = {
                 'status': 'SUCCESS',
-                'predictions_path': self.get_artifact_path('predictions_oos.parquet'),
-                'metrics': metrics
+                'predictions_path': self.get_artifact_path(
+                    'predictions_oos.parquet'),
+                'metrics': metrics,
+                'last_trade_summary': last_trade_summary,
             }
 
             self.save_output(output)
-            self.logger.info("Walk-forward backtest complete")
+            n_trades = len(trades)
+            total_ret = metrics.get('total_return', 0)
+            self.logger.info(
+                f"Backtest complete: {n_trades} trades, "
+                f"total_return={total_ret:.2%}"
+            )
             return output
 
         except Exception as e:
@@ -80,6 +124,10 @@ class BacktestAgent(BaseAgent):
             import traceback
             traceback.print_exc()
             return {'status': 'FAILED', 'error': str(e)}
+
+    # ------------------------------------------------------------------
+    # ML walk-forward (backward compat)
+    # ------------------------------------------------------------------
 
     def _simple_backtest(self, model, features, regimes, prices):
         """Walk-forward backtest with strict chronological separation."""
@@ -149,17 +197,16 @@ class BacktestAgent(BaseAgent):
         self.logger.info(f"Created {len(predictions_df)} OOS predictions")
         return predictions_df
 
-    def _calculate_metrics(self, predictions: pd.DataFrame) -> Dict[str, Any]:
-        """Calculate comprehensive metrics including required fields."""
+    def _calculate_ml_metrics(
+        self, predictions: pd.DataFrame
+    ) -> Dict[str, Any]:
+        """Calculate ML-only metrics (AUC, Brier) for backward compat."""
         if len(predictions) == 0:
             return {
-                'overall': {'auc': 0.5, 'total_samples': 0},
-                'EV_per_trade': 0.0,
-                'max_drawdown': 0.0,
-                'win_rate': 0.0,
-                'avg_trades_per_month': 0.0,
-                'by_year': [],
-                'by_regime': []
+                'overall': {
+                    'auc': 0.5, 'brier_score': 0.5,
+                    'base_rate': 0.0, 'total_samples': 0,
+                }
             }
 
         y_true = predictions['y_true'].values
@@ -168,130 +215,244 @@ class BacktestAgent(BaseAgent):
         auc = float(roc_auc_score(y_true, y_pred))
         brier = float(brier_score_loss(y_true, y_pred))
 
-        # Trading cost model
-        commission = self.config.backtest.commission_pct
-        spread = self.config.backtest.spread_bps / 10000
-        slippage = self.config.backtest.slippage_bps / 10000
-        total_friction = commission + spread + slippage
-
-        # Simulate signal-based returns
-        prob_threshold = self.config.decision.probability_threshold
-        allowed_regimes = self.config.decision.allowed_regimes
-
-        enter_mask = (
-            (predictions['y_pred_proba'] > prob_threshold) &
-            (predictions['regime'].isin(allowed_regimes))
-        )
-
-        threshold_pct = self.config.event.threshold_pct / 100.0
-
-        signal_returns = []
-        for _, row in predictions[enter_mask].iterrows():
-            raw_return = row['y_true'] * threshold_pct
-            net_return = raw_return - (total_friction * 2)
-            signal_returns.append(net_return)
-
-        ev_per_trade = float(np.mean(signal_returns)) if signal_returns else 0.0
-        win_rate = float(np.mean([r > 0 for r in signal_returns])) if signal_returns else 0.0
-
-        # Max drawdown from cumulative returns
-        if signal_returns:
-            cum = np.cumprod([1 + r for r in signal_returns])
-            cummax = np.maximum.accumulate(cum)
-            drawdowns = (cum - cummax) / cummax
-            max_dd = float(np.min(drawdowns))
-        else:
-            max_dd = 0.0
-
-        # Avg trades per month
-        if len(predictions) > 0:
-            predictions_dt = pd.to_datetime(predictions['date'])
-            total_months = max(1, (predictions_dt.max() - predictions_dt.min()).days / 30.0)
-            avg_trades_per_month = float(enter_mask.sum() / total_months)
-        else:
-            avg_trades_per_month = 0.0
-
         return {
             'overall': {
                 'auc': auc,
                 'brier_score': brier,
                 'base_rate': float(y_true.mean()),
-                'total_samples': len(predictions)
-            },
-            'EV_per_trade': ev_per_trade,
-            'max_drawdown': max_dd,
-            'win_rate': win_rate,
-            'avg_trades_per_month': avg_trades_per_month,
-            'total_signals': int(enter_mask.sum()),
-            'by_year': [],
-            'by_regime': []
+                'total_samples': len(predictions),
+            }
         }
 
-    def _generate_trades(self, predictions: pd.DataFrame) -> pd.DataFrame:
-        """Generate trade records from predictions."""
-        if len(predictions) == 0:
-            return pd.DataFrame(columns=[
-                'date', 'action', 'price', 'probability', 'regime',
-                'y_true', 'net_return'
-            ])
+    # ------------------------------------------------------------------
+    # Phase 3: Strategy-based backtest
+    # ------------------------------------------------------------------
 
-        prob_threshold = self.config.decision.probability_threshold
-        allowed_regimes = self.config.decision.allowed_regimes
-
+    def _get_one_way_cost(self) -> float:
+        """One-way trading cost from existing config plumbing."""
         commission = self.config.backtest.commission_pct
         spread = self.config.backtest.spread_bps / 10000
         slippage = self.config.backtest.slippage_bps / 10000
-        total_friction = commission + spread + slippage
-        threshold_pct = self.config.event.threshold_pct / 100.0
+        return commission + spread + slippage
 
+    def _build_strategy_trades(
+        self,
+        strategy_signals: pd.DataFrame,
+        close: pd.Series,
+    ) -> pd.DataFrame:
+        """Build trade records from Phase 2 entry/exit signals.
+
+        Each completed trade: entry_signal -> ... -> exit_signal.
+        Open trades at end of series are NOT included.
+        """
         trades = []
-        for _, row in predictions.iterrows():
-            is_enter = (
-                row['y_pred_proba'] > prob_threshold and
-                row['regime'] in allowed_regimes
+        in_trade = False
+        entry_date = entry_price = None
+        round_trip_cost = self._get_one_way_cost() * 2
+
+        close_aligned = close.reindex(strategy_signals.index)
+
+        for i in range(len(strategy_signals)):
+            idx = strategy_signals.index[i]
+            entry_sig = bool(strategy_signals['entry_signal'].iloc[i])
+            exit_sig = bool(strategy_signals['exit_signal'].iloc[i])
+            price = float(close_aligned.iloc[i])
+
+            if entry_sig and not in_trade:
+                in_trade = True
+                entry_date = idx
+                entry_price = price
+
+            if exit_sig and in_trade:
+                gross_ret = (
+                    (price / entry_price) - 1 if entry_price != 0 else 0.0
+                )
+                net_ret = gross_ret - round_trip_cost
+                dt_str = lambda d: (
+                    str(d.date()) if hasattr(d, 'date') else str(d)
+                )
+                trades.append({
+                    'entry_date': dt_str(entry_date),
+                    'entry_price': entry_price,
+                    'exit_date': dt_str(idx),
+                    'exit_price': price,
+                    'pnl': price - entry_price,
+                    'return': net_ret,
+                    'holding_days': (idx - entry_date).days,
+                })
+                in_trade = False
+
+        if not trades:
+            return pd.DataFrame(
+                columns=REQUIRED_TRADES_COLS,
             )
-            action = 'ENTER' if is_enter else 'ABSTAIN'
-            raw_return = row['y_true'] * threshold_pct
-            net_return = (raw_return - total_friction * 2) if is_enter else 0.0
 
-            trades.append({
-                'date': row['date'],
-                'action': action,
-                'price': row['price'],
-                'probability': row['y_pred_proba'],
-                'regime': row['regime'],
-                'y_true': row['y_true'],
-                'net_return': net_return
-            })
+        return pd.DataFrame(trades)[REQUIRED_TRADES_COLS]
 
-        return pd.DataFrame(trades)
+    def _build_strategy_pnl(
+        self,
+        strategy_signals: pd.DataFrame,
+        close: pd.Series,
+    ) -> pd.DataFrame:
+        """Build daily PnL series from strategy position.
 
-    def _generate_pnl_series(self, predictions: pd.DataFrame) -> pd.DataFrame:
-        """Generate cumulative PnL series."""
-        if len(predictions) == 0:
-            return pd.DataFrame(columns=['date', 'cumulative_return', 'drawdown'])
+        Convention: position[t-1]=1 earns close[t]/close[t-1]-1 on day t.
+        Costs deducted at entry and exit days.
+        """
+        close_aligned = close.reindex(strategy_signals.index)
+        position = strategy_signals['position']
 
-        trades = self._generate_trades(predictions)
-        enter_trades = trades[trades['action'] == 'ENTER'].copy()
+        daily_close_ret = close_aligned.pct_change().fillna(0)
+        prev_position = position.shift(1).fillna(0)
+        daily_return = (daily_close_ret * prev_position).copy()
 
-        if len(enter_trades) == 0:
-            return pd.DataFrame({
-                'date': predictions['date'],
-                'cumulative_return': 1.0,
-                'drawdown': 0.0
-            })
+        # Cost adjustments at entry/exit points
+        one_way_cost = self._get_one_way_cost()
+        daily_return.loc[strategy_signals['entry_signal']] -= one_way_cost
+        daily_return.loc[strategy_signals['exit_signal']] -= one_way_cost
 
-        enter_trades = enter_trades.reset_index(drop=True)
-        enter_trades['cum_return'] = (1 + enter_trades['net_return']).cumprod()
-        enter_trades['cum_max'] = enter_trades['cum_return'].cummax()
-        enter_trades['drawdown'] = (
-            (enter_trades['cum_return'] - enter_trades['cum_max']) /
-            enter_trades['cum_max']
+        equity_curve = (1 + daily_return).cumprod()
+
+        return pd.DataFrame({
+            'date': strategy_signals.index,
+            'equity_curve': equity_curve.values,
+            'daily_return': daily_return.values,
+            'position': position.values,
+        })
+
+    def _calculate_strategy_metrics(
+        self,
+        signals: pd.DataFrame,
+        close: pd.Series,
+        trades_df: pd.DataFrame,
+        pnl_df: pd.DataFrame,
+        ml_metrics: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Calculate comprehensive Phase 3 metrics."""
+        n = len(signals)
+        position = signals['position']
+
+        # --- Performance ---
+        equity = pnl_df['equity_curve'].values
+        total_return = (
+            float(equity[-1] / equity[0] - 1)
+            if n > 0 and equity[0] > 0 else 0.0
         )
 
-        return enter_trades[['date', 'cum_return', 'drawdown']].rename(
-            columns={'cum_return': 'cumulative_return'}
+        years = n / 252.0
+        if years > 0 and equity[-1] > 0 and equity[0] > 0:
+            cagr = float((equity[-1] / equity[0]) ** (1 / years) - 1)
+        else:
+            cagr = 0.0
+
+        cummax = np.maximum.accumulate(equity)
+        drawdown = np.where(cummax > 0, (equity - cummax) / cummax, 0.0)
+        max_dd = float(np.min(drawdown)) if n > 0 else 0.0
+
+        daily_returns = pnl_df['daily_return'].values
+        vol = (
+            float(np.std(daily_returns, ddof=1) * np.sqrt(252))
+            if n > 1 else 0.0
         )
+
+        mean_daily = float(np.mean(daily_returns)) if n > 0 else 0.0
+        std_daily = (
+            float(np.std(daily_returns, ddof=1)) if n > 1 else 0.0
+        )
+        sharpe = (
+            float((mean_daily / std_daily) * np.sqrt(252))
+            if std_daily > 0 else 0.0
+        )
+
+        exposure_pct = float(position.sum() / n * 100) if n > 0 else 0.0
+
+        # --- Trade stats ---
+        num_trades = len(trades_df)
+        if num_trades > 0:
+            trade_returns = trades_df['return']
+            win_rate = float((trade_returns > 0).mean())
+            avg_trade_return = float(trade_returns.mean())
+            median_trade_return = float(trade_returns.median())
+            avg_holding = float(trades_df['holding_days'].mean())
+
+            gross_profit = float(trade_returns[trade_returns > 0].sum())
+            gross_loss = float(abs(trade_returns[trade_returns < 0].sum()))
+            if gross_loss > 0:
+                profit_factor = float(gross_profit / gross_loss)
+            elif gross_profit > 0:
+                profit_factor = None  # All winners, JSON null
+            else:
+                profit_factor = 0.0
+        else:
+            win_rate = 0.0
+            avg_trade_return = 0.0
+            median_trade_return = 0.0
+            avg_holding = 0.0
+            profit_factor = 0.0
+
+        # --- Regime diagnostics ---
+        regime_ok_pct = (
+            float(signals['regime_ok'].sum() / n * 100) if n > 0 else 0.0
+        )
+        rhv_pct = (
+            float(signals['range_high_vol'].sum() / n * 100)
+            if n > 0 else 0.0
+        )
+        abstain_pct = (
+            float((position == 0).sum() / n * 100) if n > 0 else 100.0
+        )
+        entry_count = int(signals['entry_signal'].sum())
+
+        # --- Costs ---
+        one_way = self._get_one_way_cost()
+        total_costs = float(num_trades * 2 * one_way)
+        costs_per_trade = float(2 * one_way) if num_trades > 0 else 0.0
+
+        # --- Avg trades per month ---
+        months = n / 21.0
+        avg_trades_per_month = (
+            float(num_trades / months) if months > 0 else 0.0
+        )
+
+        return {
+            # ML backward compat
+            'overall': ml_metrics.get('overall', {}),
+
+            # Backward compat keys (validate_run.py)
+            'EV_per_trade': avg_trade_return,
+            'max_drawdown': max_dd,
+            'win_rate': win_rate,
+            'avg_trades_per_month': avg_trades_per_month,
+            'total_signals': entry_count,
+
+            # Phase 3 performance
+            'total_return': total_return,
+            'cagr': cagr,
+            'volatility': vol,
+            'sharpe': sharpe,
+            'exposure_time_pct': exposure_pct,
+
+            # Phase 3 trade stats
+            'num_trades': num_trades,
+            'avg_trade_return': avg_trade_return,
+            'median_trade_return': median_trade_return,
+            'profit_factor': profit_factor,
+            'avg_holding_days': avg_holding,
+
+            # Regime diagnostics
+            'days_regime_ok_pct': regime_ok_pct,
+            'days_range_high_vol_pct': rhv_pct,
+            'days_abstain_pct': abstain_pct,
+            'breakout_entry_count': entry_count,
+
+            # Costs
+            'total_costs': total_costs,
+            'costs_per_trade_avg': costs_per_trade,
+        }
+
+    # ------------------------------------------------------------------
+    # Shared helpers
+    # ------------------------------------------------------------------
 
     def _generate_costs_assumptions(self) -> Dict[str, Any]:
         """Document trading cost assumptions."""
@@ -401,25 +562,51 @@ class BacktestAgent(BaseAgent):
         }
 
     def _generate_backtest_html(self, metrics: Dict, sanity: Dict) -> str:
-        """Generate backtest HTML report."""
+        """Generate backtest HTML report with Phase 3 metrics."""
         overall = metrics.get('overall', {})
+        pf = metrics.get('profit_factor')
+        pf_str = f"{pf:.2f}" if pf is not None else "N/A (all winners)"
+
         return f"""<!DOCTYPE html>
 <html><head><title>Backtest Report</title></head>
 <body>
 <h1>Walk-Forward Backtest Report</h1>
-<h2>Overall Metrics</h2>
+<h2>Strategy Performance (Phase 3)</h2>
+<ul>
+  <li>Total Return: {metrics.get('total_return', 0):.2%}</li>
+  <li>CAGR: {metrics.get('cagr', 0):.2%}</li>
+  <li>Max Drawdown: {metrics.get('max_drawdown', 0):.2%}</li>
+  <li>Sharpe Ratio: {metrics.get('sharpe', 0):.2f}</li>
+  <li>Volatility: {metrics.get('volatility', 0):.2%}</li>
+  <li>Exposure: {metrics.get('exposure_time_pct', 0):.1f}%</li>
+</ul>
+<h2>Trade Statistics</h2>
+<ul>
+  <li>Number of Trades: {metrics.get('num_trades', 0)}</li>
+  <li>Win Rate: {metrics.get('win_rate', 0):.1%}</li>
+  <li>Avg Trade Return: {metrics.get('avg_trade_return', 0):.2%}</li>
+  <li>Median Trade Return: {metrics.get('median_trade_return', 0):.2%}</li>
+  <li>Profit Factor: {pf_str}</li>
+  <li>Avg Holding Days: {metrics.get('avg_holding_days', 0):.1f}</li>
+</ul>
+<h2>Regime Diagnostics</h2>
+<ul>
+  <li>Regime OK Days: {metrics.get('days_regime_ok_pct', 0):.1f}%</li>
+  <li>RANGE_HIGH_VOL Days: {metrics.get('days_range_high_vol_pct', 0):.1f}%</li>
+  <li>Abstain Days: {metrics.get('days_abstain_pct', 0):.1f}%</li>
+  <li>Breakout Entry Count: {metrics.get('breakout_entry_count', 0)}</li>
+</ul>
+<h2>Costs</h2>
+<ul>
+  <li>Total Costs: {metrics.get('total_costs', 0):.4%}</li>
+  <li>Cost per Trade (round-trip): {metrics.get('costs_per_trade_avg', 0):.4%}</li>
+</ul>
+<h2>ML Validation (backward compat)</h2>
 <ul>
   <li>AUC: {overall.get('auc', 'N/A')}</li>
   <li>Brier Score: {overall.get('brier_score', 'N/A')}</li>
   <li>Base Rate: {overall.get('base_rate', 'N/A')}</li>
   <li>Total OOS Samples: {overall.get('total_samples', 'N/A')}</li>
-</ul>
-<h2>Trading Metrics</h2>
-<ul>
-  <li>EV per Trade: {metrics.get('EV_per_trade', 'N/A')}</li>
-  <li>Max Drawdown: {metrics.get('max_drawdown', 'N/A')}</li>
-  <li>Win Rate: {metrics.get('win_rate', 'N/A')}</li>
-  <li>Avg Trades/Month: {metrics.get('avg_trades_per_month', 'N/A')}</li>
 </ul>
 <h2>Sanity Tests</h2>
 <ul>

@@ -62,6 +62,14 @@ REQUIRED_METRICS_FIELDS = [
     "max_drawdown",
     "win_rate",
     "avg_trades_per_month",
+    # Phase 3
+    "total_return",
+    "cagr",
+    "sharpe",
+    "exposure_time_pct",
+    "num_trades",
+    "days_regime_ok_pct",
+    "days_range_high_vol_pct",
 ]
 
 REQUIRED_ABSTAIN_STATS_FIELDS = [
