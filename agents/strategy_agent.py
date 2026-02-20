@@ -3,10 +3,10 @@ StrategyAgent - Computes MA150+ATR strategy signals and artifacts.
 
 Runs AFTER DataAgent (needs raw OHLCV) and BEFORE DecisionRiskAgent.
 Produces:
-    - strategy_signals.parquet  (regime_ok, range_high_vol, entry_signal,
-                                 exit_signal, stop_price, position)
+    - strategy_signals.parquet  (regime_ok, range_high_vol, ma150_trend_ok,
+                                 entry_signal, exit_signal, stop_price, position)
     - strategy_explain.json     (daily reasons keyed by date)
-    - stop_series.parquet       (date, stop_price)
+    - stop_series.parquet       (date, stop_price, position)
 """
 
 import json
@@ -76,6 +76,7 @@ class StrategyAgent(BaseAgent):
             stop_df = pd.DataFrame({
                 "date": result.index,
                 "stop_price": result["stop_price"].values,
+                "position": result["position"].values,
             })
 
             # ---- Save artifacts ----
