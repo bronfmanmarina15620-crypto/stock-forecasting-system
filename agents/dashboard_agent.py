@@ -101,6 +101,9 @@ class DashboardAgent(BaseAgent):
         stop_str = f"{stop_today:.4f}" if stop_today is not None else "N/A (flat)"
         because_html = "".join(f"<li>{b}</li>" for b in because) if because else "<li>No reasons available</li>"
 
+        # Phase 3 backtest metrics
+        bt_metrics = backtest_output.get("metrics", {})
+
         html = f"""
 <!DOCTYPE html>
 <html lang="en" dir="ltr">
@@ -244,7 +247,35 @@ class DashboardAgent(BaseAgent):
             </div>
         </div>
 
-        <h2>Backtest Performance</h2>
+        <h2>Backtest Performance (Phase 3)</h2>
+        <div class="card">
+            <div class="metric">
+                <span class="metric-label">Total Return:</span>
+                <span class="metric-value">{bt_metrics.get('total_return', 0):.2%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Max Drawdown:</span>
+                <span class="metric-value">{bt_metrics.get('max_drawdown', 0):.2%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Sharpe:</span>
+                <span class="metric-value">{bt_metrics.get('sharpe', 0):.2f}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Trades:</span>
+                <span class="metric-value">{bt_metrics.get('num_trades', 0)}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Win Rate:</span>
+                <span class="metric-value">{bt_metrics.get('win_rate', 0):.1%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Exposure:</span>
+                <span class="metric-value">{bt_metrics.get('exposure_time_pct', 0):.1f}%</span>
+            </div>
+        </div>
+
+        <h2>ML Validation</h2>
         <div class="card">
             <div class="metric">
                 <span class="metric-label">AUC:</span>
@@ -347,9 +378,10 @@ class DashboardAgent(BaseAgent):
         return html
 
     def _generate_json_report(self, **kwargs) -> Dict[str, Any]:
-        """Generate JSON summary report with Phase 2 strategy fields."""
+        """Generate JSON summary report with Phase 2 + Phase 3 fields."""
         decision_output = kwargs["decision_output"]
         strategy_output = kwargs["strategy_output"]
+        backtest_output = kwargs["backtest_output"]
         decision_action = decision_output.get("decision_action", {})
 
         # Phase 2 fields for "today"
@@ -367,11 +399,31 @@ class DashboardAgent(BaseAgent):
             "because": decision_action.get("because", []),
         }
 
+        # Phase 3 backtest summary
+        bt_metrics = backtest_output.get("metrics", {})
+        backtest_section = {
+            "status": backtest_output.get("status", "UNKNOWN"),
+            "predictions_path": backtest_output.get("predictions_path"),
+            "metrics": bt_metrics,
+            "summary": {
+                "total_return": bt_metrics.get("total_return"),
+                "max_drawdown": bt_metrics.get("max_drawdown"),
+                "sharpe": bt_metrics.get("sharpe"),
+                "num_trades": bt_metrics.get("num_trades"),
+                "win_rate": bt_metrics.get("win_rate"),
+                "exposure_time_pct": bt_metrics.get("exposure_time_pct"),
+                "days_range_high_vol_pct": bt_metrics.get(
+                    "days_range_high_vol_pct"),
+                "last_trade_summary": backtest_output.get(
+                    "last_trade_summary"),
+            },
+        }
+
         return {
             "ticker": self.config.ticker,
             "run_timestamp": datetime.now().isoformat(),
             "data": kwargs["data_output"],
-            "backtest": kwargs["backtest_output"],
+            "backtest": backtest_section,
             "strategy": {
                 "status": strategy_output.get("status", "UNKNOWN"),
                 "params": strategy_output.get("params", {}),
