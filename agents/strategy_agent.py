@@ -61,8 +61,8 @@ class StrategyAgent(BaseAgent):
 
             # ---- Build artifacts ----
             signal_cols = [
-                "regime_ok", "range_high_vol", "entry_signal",
-                "exit_signal", "stop_price", "position",
+                "regime_ok", "range_high_vol", "ma150_trend_ok",
+                "entry_signal", "exit_signal", "stop_price", "position",
             ]
             signals_df = result[signal_cols].copy()
 
