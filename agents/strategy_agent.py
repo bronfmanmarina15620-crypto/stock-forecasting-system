@@ -39,6 +39,10 @@ _EXPECTED_DTYPES = {
     "position": "int64",
 }
 
+# Phase 2 schema lock for stop_series.parquet
+REQUIRED_STOP_COLS = ["date", "stop_price", "position"]
+_EXPECTED_STOP_DTYPES = {"stop_price": "float64", "position": "int64"}
+
 
 def _validate_signal_schema(df: pd.DataFrame) -> None:
     """Validate strategy_signals DataFrame against the locked schema.
@@ -60,6 +64,39 @@ def _validate_signal_schema(df: pd.DataFrame) -> None:
                 f"strategy_signals dtype mismatch for '{col}': "
                 f"expected {expected_dtype}, got {actual}"
             )
+
+
+def _validate_stop_schema(df: pd.DataFrame) -> None:
+    """Validate stop_series DataFrame against the locked schema.
+
+    Raises ValueError on any mismatch.
+    """
+    actual_cols = list(df.columns)
+    if actual_cols != REQUIRED_STOP_COLS:
+        raise ValueError(
+            f"stop_series schema mismatch.\n"
+            f"  Expected: {REQUIRED_STOP_COLS}\n"
+            f"  Got:      {actual_cols}"
+        )
+    for col, expected_dtype in _EXPECTED_STOP_DTYPES.items():
+        actual = str(df[col].dtype)
+        if actual != expected_dtype:
+            raise ValueError(
+                f"stop_series dtype mismatch for '{col}': "
+                f"expected {expected_dtype}, got {actual}"
+            )
+    # date must be datetime-like
+    if not pd.api.types.is_datetime64_any_dtype(df["date"]):
+        raise ValueError(
+            f"stop_series 'date' must be datetime-like, got {df['date'].dtype}"
+        )
+    # position must only contain {0, 1}
+    unique_pos = set(df["position"].dropna().unique())
+    if not unique_pos.issubset({0, 1}):
+        raise ValueError(
+            f"stop_series 'position' contains invalid values: "
+            f"{unique_pos - {0, 1}}"
+        )
 
 
 class StrategyAgent(BaseAgent):
@@ -119,9 +156,10 @@ class StrategyAgent(BaseAgent):
                 "position": result["position"].values,
             })
 
-            # ---- Save artifacts ----
+            # ---- Validate & save artifacts ----
             self.save_artifact("strategy_signals.parquet", signals_df)
             self.save_artifact("strategy_explain.json", explain)
+            _validate_stop_schema(stop_df)
             self.save_artifact("stop_series.parquet", stop_df)
 
             # Summary stats for output.json
