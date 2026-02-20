@@ -419,6 +419,6 @@ This system is for educational and research purposes. Past performance does not 
 
 ---
 
-**Version**: 0.4.0
+**Version**: 0.4.1 (`v0.4.1-phase4-hardening`)
 **Last Updated**: 2026-02-20
 **Status**: Production-Ready MVP (Single-Ticker Mode, Phase 4 Risk Sizing)
