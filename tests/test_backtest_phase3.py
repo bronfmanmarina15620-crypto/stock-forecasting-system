@@ -270,8 +270,8 @@ class TestStrategyMetrics:
         close = _make_close(n, start=100.0, step=1.0)
         trades = self.agent._build_strategy_trades(signals, close)
         pnl = self.agent._build_strategy_pnl(signals, close)
-        ml_metrics = {'overall': {'auc': 0.5, 'brier_score': 0.5,
-                                   'base_rate': 0.1, 'total_samples': 10}}
+        ml_metrics = {'legacy_ml': {'auc': 0.5, 'brier_score': 0.5,
+                                     'base_rate': 0.1, 'total_samples': 10}}
         return self.agent._calculate_strategy_metrics(
             signals, close, trades, pnl, ml_metrics
         )
@@ -282,11 +282,11 @@ class TestStrategyMetrics:
         for key in REQUIRED_METRICS_KEYS:
             assert key in metrics, f"Missing key: {key}"
 
-    def test_ml_backward_compat(self):
-        """metrics['overall'] must contain ML metrics."""
+    def test_legacy_ml_nested(self):
+        """metrics['legacy_ml'] must contain ML metrics when provided."""
         metrics = self._compute()
-        assert 'auc' in metrics['overall']
-        assert 'brier_score' in metrics['overall']
+        assert 'auc' in metrics['legacy_ml']
+        assert 'brier_score' in metrics['legacy_ml']
 
     def test_single_winning_trade(self):
         """One winning trade with known prices → verify metrics."""
@@ -423,14 +423,14 @@ class TestBacktestModeGuardrails:
 
     def test_stub_ml_metrics_has_required_keys(self):
         """_STUB_ML_METRICS must provide numeric defaults for dashboard."""
-        overall = _STUB_ML_METRICS['overall']
-        assert 'auc' in overall
-        assert 'brier_score' in overall
-        assert 'base_rate' in overall
-        assert 'total_samples' in overall
+        legacy = _STUB_ML_METRICS['legacy_ml']
+        assert 'auc' in legacy
+        assert 'brier_score' in legacy
+        assert 'base_rate' in legacy
+        assert 'total_samples' in legacy
         # Must be numeric (not string "N/A") so formatters don't crash
-        assert isinstance(overall['auc'], (int, float))
-        assert isinstance(overall['brier_score'], (int, float))
+        assert isinstance(legacy['auc'], (int, float))
+        assert isinstance(legacy['brier_score'], (int, float))
 
     def test_metrics_schema_phase3_top_level_keys_present(self):
         """Phase 3 top-level metrics must be present with stub ML metrics."""
@@ -449,5 +449,5 @@ class TestBacktestModeGuardrails:
         for key in REQUIRED_METRICS_KEYS:
             assert key in metrics, f"Missing Phase 3 key with stub ML: {key}"
 
-        # overall must be the stub
-        assert metrics['overall'] == _STUB_ML_METRICS['overall']
+        # legacy_ml must be the stub
+        assert metrics['legacy_ml'] == _STUB_ML_METRICS['legacy_ml']

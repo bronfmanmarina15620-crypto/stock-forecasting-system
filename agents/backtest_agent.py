@@ -24,7 +24,7 @@ REQUIRED_TRADES_COLS = [
 ]
 REQUIRED_METRICS_KEYS = [
     # Backward compat
-    "overall", "EV_per_trade", "max_drawdown", "win_rate",
+    "EV_per_trade", "max_drawdown", "win_rate",
     "avg_trades_per_month", "total_signals",
     # Phase 3 performance
     "total_return", "cagr", "volatility", "sharpe", "exposure_time_pct",
@@ -40,7 +40,7 @@ REQUIRED_METRICS_KEYS = [
 
 # Stub ML metrics for signals_only mode (numeric defaults so formatters work)
 _STUB_ML_METRICS = {
-    'overall': {
+    'legacy_ml': {
         'auc': 0.5,
         'brier_score': 0.5,
         'base_rate': 0.0,
@@ -89,32 +89,51 @@ class BacktestAgent(BaseAgent):
             )
             close = pd.read_parquet(data_output['data_path'])['Close']
 
+            emit_stubs = getattr(
+                self.config.backtest, 'emit_legacy_stubs', True
+            )
+            ml_input = _STUB_ML_METRICS if emit_stubs else {}
+
             trades = self._build_strategy_trades(strategy_signals, close)
             pnl_series = self._build_strategy_pnl(strategy_signals, close)
             metrics = self._calculate_strategy_metrics(
-                strategy_signals, close, trades, pnl_series, _STUB_ML_METRICS
+                strategy_signals, close, trades, pnl_series, ml_input
             )
 
             metrics['content_hash_sha256'] = content_hash_sha256(metrics)
             costs_assumptions = self._generate_costs_assumptions()
 
-            # Stub ML artifacts for backward compat (DecisionRiskAgent, validate_run)
-            stub_predictions = pd.DataFrame(
-                columns=['date', 'y_true', 'y_pred_proba', 'regime', 'price']
-            )
-            stub_sanity = {
-                'shuffled_labels_auc': 0.50,
-                'future_shift_auc': 0.50,
-                'status': 'SKIPPED',
-                'reason': 'signals_only mode: ML sanity tests not applicable',
-            }
-
-            self.save_artifact('predictions_oos.parquet', stub_predictions)
-            self.save_artifact('sanity_tests.json', stub_sanity)
+            # Phase 3 artifacts (always written at top level)
             self.save_artifact('costs_assumptions.json', costs_assumptions)
             self.save_artifact('trades.parquet', trades)
             self.save_artifact('pnl_series.parquet', pnl_series)
             self.save_artifact('metrics.json', metrics)
+
+            # Legacy ML stubs — isolated under legacy_ml/ subfolder
+            stub_sanity = {}
+            if emit_stubs:
+                legacy_dir = os.path.join(self.agent_dir, 'legacy_ml')
+                os.makedirs(legacy_dir, exist_ok=True)
+
+                stub_predictions = pd.DataFrame(
+                    columns=[
+                        'date', 'y_true', 'y_pred_proba', 'regime', 'price',
+                    ]
+                )
+                stub_sanity = {
+                    'shuffled_labels_auc': 0.50,
+                    'future_shift_auc': 0.50,
+                    'status': 'SKIPPED',
+                    'reason':
+                        'signals_only mode: ML sanity tests not applicable',
+                }
+                self.save_artifact(
+                    'legacy_ml/predictions_oos.parquet', stub_predictions,
+                )
+                self.save_artifact(
+                    'legacy_ml/sanity_tests.json', stub_sanity,
+                )
+
             self.save_artifact(
                 'backtest_report.html',
                 self._generate_backtest_html(metrics, stub_sanity),
@@ -126,8 +145,6 @@ class BacktestAgent(BaseAgent):
 
             output = {
                 'status': 'SUCCESS',
-                'predictions_path': self.get_artifact_path(
-                    'predictions_oos.parquet'),
                 'metrics': metrics,
                 'last_trade_summary': last_trade_summary,
             }
@@ -310,7 +327,7 @@ class BacktestAgent(BaseAgent):
 
         if len(predictions) == 0:
             return {
-                'overall': {
+                'legacy_ml': {
                     'auc': 0.5, 'brier_score': 0.5,
                     'base_rate': 0.0, 'total_samples': 0,
                 }
@@ -323,7 +340,7 @@ class BacktestAgent(BaseAgent):
         brier = float(brier_score_loss(y_true, y_pred))
 
         return {
-            'overall': {
+            'legacy_ml': {
                 'auc': auc,
                 'brier_score': brier,
                 'base_rate': float(y_true.mean()),
@@ -521,10 +538,7 @@ class BacktestAgent(BaseAgent):
             float(num_trades / months) if months > 0 else 0.0
         )
 
-        return {
-            # ML backward compat
-            'overall': ml_metrics.get('overall', {}),
-
+        metrics = {
             # Backward compat keys (validate_run.py)
             'EV_per_trade': avg_trade_return,
             'max_drawdown': max_dd,
@@ -556,6 +570,13 @@ class BacktestAgent(BaseAgent):
             'total_costs': total_costs,
             'costs_per_trade_avg': costs_per_trade,
         }
+
+        # Add legacy_ml only if provided (signals_only with stubs, or legacy_ml mode)
+        legacy_ml = ml_metrics.get('legacy_ml')
+        if legacy_ml is not None:
+            metrics['legacy_ml'] = legacy_ml
+
+        return metrics
 
     # ------------------------------------------------------------------
     # Shared helpers
@@ -673,7 +694,7 @@ class BacktestAgent(BaseAgent):
 
     def _generate_backtest_html(self, metrics: Dict, sanity: Dict) -> str:
         """Generate backtest HTML report with Phase 3 metrics."""
-        overall = metrics.get('overall', {})
+        overall = metrics.get('legacy_ml', {})
         pf = metrics.get('profit_factor')
         pf_str = f"{pf:.2f}" if pf is not None else "N/A (all winners)"
 
