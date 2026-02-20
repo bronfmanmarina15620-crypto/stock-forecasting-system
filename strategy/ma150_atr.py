@@ -11,14 +11,14 @@ Position timing convention: same-bar (EOD).
 Rules
 -----
 A) Regime Filter
-   trend_ok = (close > ma150) & (slope(ma150) > 0)
+   ma150_trend_ok = (close > ma150) & (slope(ma150) > 0)
    slope[t] = ma150[t] - ma150[t - slope_lookback]
 
 B) RANGE_HIGH_VOL block
    trend_weak = abs(slope) <= slope_min
    high_vol   = (atr / close) >= atr_pct_high
    range_high_vol = trend_weak & high_vol
-   regime_ok  = trend_ok & (~range_high_vol)
+   regime_ok  = ma150_trend_ok & (~range_high_vol)
 
 C) Entry: 20-day breakout
    entry_signal = regime_ok & (close > rolling_max(close, entry_lookback).shift(1))
@@ -75,8 +75,8 @@ def compute_ma150_atr_strategy(
     Returns
     -------
     pd.DataFrame
-        Columns: regime_ok, range_high_vol, entry_signal, exit_signal,
-                 stop_price, position, reasons
+        Columns: regime_ok, range_high_vol, ma150_trend_ok, entry_signal,
+                 exit_signal, stop_price, position, reasons
     """
     n = len(close)
     idx = close.index
@@ -86,7 +86,7 @@ def compute_ma150_atr_strategy(
     # ------------------------------------------------------------------
     # slope[t] = ma150[t] - ma150[t - slope_lookback]  (no lookahead)
     slope = ma150 - ma150.shift(slope_lookback)
-    trend_ok = (close > ma150) & (slope > 0)
+    ma150_trend_ok = (close > ma150) & (slope > 0)
 
     # ------------------------------------------------------------------
     # B) RANGE_HIGH_VOL
@@ -96,8 +96,8 @@ def compute_ma150_atr_strategy(
     high_vol = atr_pct >= atr_pct_high
     range_high_vol = trend_weak & high_vol
 
-    # regime_ok = trend_ok AND NOT range_high_vol
-    regime_ok = trend_ok & (~range_high_vol)
+    # regime_ok = ma150_trend_ok AND NOT range_high_vol
+    regime_ok = ma150_trend_ok & (~range_high_vol)
 
     # ------------------------------------------------------------------
     # C) Breakout entry condition (vectorised part)
@@ -127,7 +127,7 @@ def compute_ma150_atr_strategy(
         s = slope.iloc[i]
         _safe_bool = lambda v: bool(v) if not pd.isna(v) else False
         rhv = _safe_bool(range_high_vol.iloc[i])
-        to = _safe_bool(trend_ok.iloc[i])
+        to = _safe_bool(ma150_trend_ok.iloc[i])
         bc = _safe_bool(breakout.iloc[i])
         ec = _safe_bool(entry_condition.iloc[i])
 
@@ -206,6 +206,7 @@ def compute_ma150_atr_strategy(
         {
             "regime_ok": regime_ok,
             "range_high_vol": range_high_vol,
+            "ma150_trend_ok": ma150_trend_ok,
             "entry_signal": pd.array(entry_signal, dtype=bool),
             "exit_signal": pd.array(exit_signal, dtype=bool),
             "stop_price": stop_price,
