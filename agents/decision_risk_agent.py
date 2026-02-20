@@ -73,14 +73,24 @@ class DecisionRiskAgent(BaseAgent):
             ):
                 return {"status": "FAILED", "error": "Dependencies failed"}
 
+            # Search legacy_ml/ subfolder first, then top-level, then empty
             predictions_path = os.path.join(
-                self.run_dir, "BacktestAgent", "predictions_oos.parquet"
+                self.run_dir, "BacktestAgent", "legacy_ml",
+                "predictions_oos.parquet",
             )
             if not os.path.exists(predictions_path):
-                raise FileNotFoundError(
-                    f"predictions_oos.parquet not found at {predictions_path}"
+                predictions_path = os.path.join(
+                    self.run_dir, "BacktestAgent",
+                    "predictions_oos.parquet",
                 )
-            predictions = pd.read_parquet(predictions_path)
+            if os.path.exists(predictions_path):
+                predictions = pd.read_parquet(predictions_path)
+            else:
+                predictions = pd.DataFrame(
+                    columns=[
+                        "date", "y_true", "y_pred_proba", "regime", "price",
+                    ]
+                )
 
             # ----------------------------------------------------------
             # Load strategy signals (Phase 2)

@@ -89,7 +89,7 @@ class DashboardAgent(BaseAgent):
         decision_action = decision_output["decision_action"]
         portfolio_plan = portfolio_output["portfolio_plan"]
         risk_summary = portfolio_output["risk_summary"]
-        ml_overall = backtest_output.get("metrics", {}).get("overall", {})
+        ml_overall = backtest_output.get("metrics", {}).get("legacy_ml", {})
 
         # Phase 2 strategy fields
         ma150_trend_ok = decision_action.get("ma150_trend_ok", False)
