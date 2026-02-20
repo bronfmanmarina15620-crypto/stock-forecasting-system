@@ -51,3 +51,8 @@ memory/
 !runs/.gitkeep
 !data_cache/.gitkeep
 !memory/.gitkeep
+
+# Environment & secret files (prevent accidental commits)
+.env
+*.env
+secrets.*
