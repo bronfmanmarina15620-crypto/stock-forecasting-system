@@ -110,10 +110,12 @@ stock-forecasting-system/
 │           ├── BacktestAgent/
 │           │   ├── output.json
 │           │   ├── agent.log
-│           │   ├── predictions_oos.parquet
+│           │   ├── trades.parquet
+│           │   ├── pnl_series.parquet
 │           │   ├── metrics.json
+│           │   ├── risk_explain.json
 │           │   ├── backtest_report.html
-│           │   └── sanity_tests.json
+│           │   └── legacy_ml/            # (only when backtest_mode: legacy_ml)
 │           │
 │           ├── DecisionRiskAgent/
 │           │   ├── output.json
@@ -176,8 +178,9 @@ stock-forecasting-system/
 
 ### 6. BacktestAgent
 - **Role**: Walk-forward validation with realistic frictions
-- **Outputs**: Out-of-sample predictions, metrics by year/regime, sanity tests
-- **Includes**: Data leakage tests, trading costs (commissions + spread + slippage)
+- **Mode**: `signals_only` (default) uses Phase 2 strategy signals; `legacy_ml` uses ML walk-forward
+- **Outputs**: trades.parquet, pnl_series.parquet, metrics.json, risk_explain.json
+- **Includes**: Phase 4 position sizing, trading costs (commissions + spread + slippage)
 
 ### 7. DecisionRiskAgent
 - **Role**: Converts probabilities into ENTER/ABSTAIN decisions
@@ -217,6 +220,48 @@ commission_pct = 0.001                   # 0.1% per trade
 spread_bps = 2.0                         # 2 bps
 slippage_bps = 3.0                       # 3 bps
 ```
+
+## Phase 4: Risk-Based Position Sizing
+
+BacktestAgent (in `signals_only` mode) sizes every trade using an R-multiple model:
+
+```
+shares = floor(risk_per_trade * equity / stop_distance)
+```
+
+Guardrails cap exposure by `max_position_pct` and `max_leverage`, and skip trades whose stop percentage falls outside `[min_stop_pct, max_stop_pct]`.
+
+### Configuration
+
+All risk parameters live in `config/strategy.yaml`:
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `risk_per_trade` | 0.005 | Fraction of equity risked per trade |
+| `capital_base` | 100000 | Starting equity ($) |
+| `max_leverage` | 1.0 | Maximum portfolio leverage |
+| `max_position_pct` | 0.25 | Maximum single-position size (fraction of equity) |
+| `min_stop_pct` | 0.01 | Minimum stop distance (% from entry) |
+| `max_stop_pct` | 0.20 | Maximum stop distance (% from entry) |
+
+### Artifacts
+
+| Path | Description |
+|------|-------------|
+| `BacktestAgent/risk_explain.json` | Audit trail: sizing decision for every trade |
+| `BacktestAgent/trades.parquet` | 7 added columns: `shares`, `notional`, `exposure_pct`, `stop_distance`, `stop_pct`, `risk_budget`, `r_multiple` |
+| `BacktestAgent/metrics.json` | 9 added keys: `avg_exposure_pct`, `max_exposure_pct`, `avg_r_multiple`, `median_r_multiple`, `worst_r_multiple`, `best_r_multiple`, `pct_trades_skipped_due_to_stop_bounds`, `pct_trades_capped_by_max_position`, `realized_risk_per_trade_avg` |
+
+### How to run and validate
+
+```bash
+python run.py --ticker PLTR
+python validate_run.py --run runs/PLTR/<RUN_ID>
+```
+
+`validate_run.py` checks all 9 Phase 4 metric keys plus `risk_explain.json` existence.
+
+When `backtest_mode: legacy_ml`, stub `risk_explain.json` and zeroed Phase 4 metrics are emitted so validation still passes.
 
 ## 🛡️ Safety Features
 
@@ -374,6 +419,6 @@ This system is for educational and research purposes. Past performance does not 
 
 ---
 
-**Version**: 1.0.0  
-**Last Updated**: 2024-02-14  
-**Status**: Production-Ready MVP (Single-Ticker Mode)
+**Version**: 0.4.0
+**Last Updated**: 2026-02-20
+**Status**: Production-Ready MVP (Single-Ticker Mode, Phase 4 Risk Sizing)
