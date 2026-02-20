@@ -262,6 +262,7 @@ class DecisionRiskAgent(BaseAgent):
             "action": action,
             "regime_ok": bool(last["regime_ok"]) if not pd.isna(last["regime_ok"]) else False,
             "range_high_vol": bool(last["range_high_vol"]) if not pd.isna(last["range_high_vol"]) else False,
+            "ma150_trend_ok": bool(last["ma150_trend_ok"]) if not pd.isna(last["ma150_trend_ok"]) else False,
             "entry_signal": bool(last["entry_signal"]),
             "exit_signal": bool(last["exit_signal"]),
             "position": position,
