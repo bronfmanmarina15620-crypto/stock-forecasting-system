@@ -34,6 +34,9 @@ wheels/
 *.swo
 *~
 
+# Claude Code
+.claude/settings.json
+
 # System
 .DS_Store
 Thumbs.db
