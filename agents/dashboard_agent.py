@@ -92,7 +92,7 @@ class DashboardAgent(BaseAgent):
         metrics = backtest_output["metrics"]["overall"]
 
         # Phase 2 strategy fields
-        regime_ok = decision_action.get("regime_ok", False)
+        ma150_trend_ok = decision_action.get("ma150_trend_ok", False)
         rhv_block = decision_action.get("range_high_vol", False)
         entry_ready = decision_action.get("entry_signal", False)
         stop_today = decision_action.get("stop_price")
@@ -223,7 +223,7 @@ class DashboardAgent(BaseAgent):
             <div style="margin-top: 15px;">
                 <div class="metric">
                     <span class="metric-label">MA150 Trend OK:</span>
-                    <span class="metric-value">{regime_ok}</span>
+                    <span class="metric-value">{ma150_trend_ok}</span>
                 </div>
                 <div class="metric">
                     <span class="metric-label">RANGE_HIGH_VOL Block:</span>
@@ -354,7 +354,7 @@ class DashboardAgent(BaseAgent):
 
         # Phase 2 fields for "today"
         strategy_today = {
-            "ma150_trend_ok": decision_action.get("regime_ok", False),
+            "ma150_trend_ok": decision_action.get("ma150_trend_ok", False),
             "range_high_vol_block": decision_action.get("range_high_vol", False),
             "range_high_vol_reason": (
                 next(
