@@ -297,6 +297,22 @@ class DashboardAgent(BaseAgent):
                 <span class="metric-label">Best R-Multiple:</span>
                 <span class="metric-value">{bt_metrics.get('best_r_multiple', 0):.2f}</span>
             </div>
+            <div class="metric">
+                <span class="metric-label">Median R-Multiple:</span>
+                <span class="metric-value">{bt_metrics.get('median_r_multiple', 0):.2f}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Trades Skipped (stop bounds):</span>
+                <span class="metric-value">{bt_metrics.get('pct_trades_skipped_due_to_stop_bounds', 0):.1%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Trades Capped (max position):</span>
+                <span class="metric-value">{bt_metrics.get('pct_trades_capped_by_max_position', 0):.1%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Realized Risk/Trade Avg:</span>
+                <span class="metric-value">{bt_metrics.get('realized_risk_per_trade_avg', 0):.4f}</span>
+            </div>
         </div>
 
         <h2>ML Validation</h2>
@@ -442,8 +458,17 @@ class DashboardAgent(BaseAgent):
                     "last_trade_summary"),
                 # Phase 4 risk
                 "avg_exposure_pct": bt_metrics.get("avg_exposure_pct"),
+                "max_exposure_pct": bt_metrics.get("max_exposure_pct"),
                 "avg_r_multiple": bt_metrics.get("avg_r_multiple"),
+                "median_r_multiple": bt_metrics.get("median_r_multiple"),
                 "worst_r_multiple": bt_metrics.get("worst_r_multiple"),
+                "best_r_multiple": bt_metrics.get("best_r_multiple"),
+                "pct_trades_skipped_due_to_stop_bounds": bt_metrics.get(
+                    "pct_trades_skipped_due_to_stop_bounds"),
+                "pct_trades_capped_by_max_position": bt_metrics.get(
+                    "pct_trades_capped_by_max_position"),
+                "realized_risk_per_trade_avg": bt_metrics.get(
+                    "realized_risk_per_trade_avg"),
             },
         }
 

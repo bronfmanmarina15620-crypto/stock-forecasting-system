@@ -71,8 +71,14 @@ REQUIRED_METRICS_FIELDS = [
     "days_range_high_vol_pct",
     # Phase 4 risk
     "avg_exposure_pct",
+    "max_exposure_pct",
     "avg_r_multiple",
+    "median_r_multiple",
     "worst_r_multiple",
+    "best_r_multiple",
+    "pct_trades_skipped_due_to_stop_bounds",
+    "pct_trades_capped_by_max_position",
+    "realized_risk_per_trade_avg",
 ]
 
 REQUIRED_ABSTAIN_STATS_FIELDS = [

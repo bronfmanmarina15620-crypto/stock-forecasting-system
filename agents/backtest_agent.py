@@ -549,11 +549,21 @@ class BacktestAgent(BaseAgent):
                 strategy_signals, close, trades, pnl_series, ml_metrics
             )
 
+            # Phase 4 stubs (risk sizing not applicable in legacy_ml mode)
+            for key in PHASE4_METRICS_KEYS:
+                metrics[key] = 0.0
+
             metrics['content_hash_sha256'] = content_hash_sha256(metrics)
 
             self.save_artifact('trades.parquet', trades)
             self.save_artifact('pnl_series.parquet', pnl_series)
             self.save_artifact('metrics.json', metrics)
+
+            # Phase 4 stub artifact
+            self.save_artifact('risk_explain.json', {
+                '_note': 'Phase 4 risk sizing not applicable in legacy_ml mode',
+            })
+
             self.save_artifact(
                 'backtest_report.html',
                 self._generate_backtest_html(metrics, sanity_results),
