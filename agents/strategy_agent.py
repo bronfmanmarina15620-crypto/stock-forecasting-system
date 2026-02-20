@@ -3,10 +3,10 @@ StrategyAgent - Computes MA150+ATR strategy signals and artifacts.
 
 Runs AFTER DataAgent (needs raw OHLCV) and BEFORE DecisionRiskAgent.
 Produces:
-    - strategy_signals.parquet  (regime_ok, range_high_vol, entry_signal,
-                                 exit_signal, stop_price, position)
+    - strategy_signals.parquet  (regime_ok, range_high_vol, ma150_trend_ok,
+                                 entry_signal, exit_signal, stop_price, position)
     - strategy_explain.json     (daily reasons keyed by date)
-    - stop_series.parquet       (date, stop_price)
+    - stop_series.parquet       (date, stop_price, position)
 """
 
 import json
@@ -17,6 +17,86 @@ from typing import Dict, Any
 
 from .base_agent import BaseAgent
 from strategy.ma150_atr import compute_ma150_atr_strategy
+
+# Phase 2 schema lock — any change here requires a migration plan.
+REQUIRED_SIGNAL_COLS = [
+    "regime_ok",
+    "range_high_vol",
+    "ma150_trend_ok",
+    "entry_signal",
+    "exit_signal",
+    "stop_price",
+    "position",
+]
+
+_EXPECTED_DTYPES = {
+    "regime_ok": "bool",
+    "range_high_vol": "bool",
+    "ma150_trend_ok": "bool",
+    "entry_signal": "bool",
+    "exit_signal": "bool",
+    "stop_price": "float64",
+    "position": "int64",
+}
+
+# Phase 2 schema lock for stop_series.parquet
+REQUIRED_STOP_COLS = ["date", "stop_price", "position"]
+_EXPECTED_STOP_DTYPES = {"stop_price": "float64", "position": "int64"}
+
+
+def _validate_signal_schema(df: pd.DataFrame) -> None:
+    """Validate strategy_signals DataFrame against the locked schema.
+
+    Raises ValueError on any mismatch so broken schemas fail loudly
+    instead of silently corrupting downstream artifacts.
+    """
+    actual_cols = list(df.columns)
+    if actual_cols != REQUIRED_SIGNAL_COLS:
+        raise ValueError(
+            f"strategy_signals schema mismatch.\n"
+            f"  Expected: {REQUIRED_SIGNAL_COLS}\n"
+            f"  Got:      {actual_cols}"
+        )
+    for col, expected_dtype in _EXPECTED_DTYPES.items():
+        actual = str(df[col].dtype)
+        if actual != expected_dtype:
+            raise ValueError(
+                f"strategy_signals dtype mismatch for '{col}': "
+                f"expected {expected_dtype}, got {actual}"
+            )
+
+
+def _validate_stop_schema(df: pd.DataFrame) -> None:
+    """Validate stop_series DataFrame against the locked schema.
+
+    Raises ValueError on any mismatch.
+    """
+    actual_cols = list(df.columns)
+    if actual_cols != REQUIRED_STOP_COLS:
+        raise ValueError(
+            f"stop_series schema mismatch.\n"
+            f"  Expected: {REQUIRED_STOP_COLS}\n"
+            f"  Got:      {actual_cols}"
+        )
+    for col, expected_dtype in _EXPECTED_STOP_DTYPES.items():
+        actual = str(df[col].dtype)
+        if actual != expected_dtype:
+            raise ValueError(
+                f"stop_series dtype mismatch for '{col}': "
+                f"expected {expected_dtype}, got {actual}"
+            )
+    # date must be datetime-like
+    if not pd.api.types.is_datetime64_any_dtype(df["date"]):
+        raise ValueError(
+            f"stop_series 'date' must be datetime-like, got {df['date'].dtype}"
+        )
+    # position must only contain {0, 1}
+    unique_pos = set(df["position"].dropna().unique())
+    if not unique_pos.issubset({0, 1}):
+        raise ValueError(
+            f"stop_series 'position' contains invalid values: "
+            f"{unique_pos - {0, 1}}"
+        )
 
 
 class StrategyAgent(BaseAgent):
@@ -60,11 +140,8 @@ class StrategyAgent(BaseAgent):
             result = compute_ma150_atr_strategy(close, ma150, atr, **params)
 
             # ---- Build artifacts ----
-            signal_cols = [
-                "regime_ok", "range_high_vol", "entry_signal",
-                "exit_signal", "stop_price", "position",
-            ]
-            signals_df = result[signal_cols].copy()
+            signals_df = result[REQUIRED_SIGNAL_COLS].copy()
+            _validate_signal_schema(signals_df)
 
             # Strategy explain: daily reasons keyed by date string
             explain = {}
@@ -76,11 +153,13 @@ class StrategyAgent(BaseAgent):
             stop_df = pd.DataFrame({
                 "date": result.index,
                 "stop_price": result["stop_price"].values,
+                "position": result["position"].values,
             })
 
-            # ---- Save artifacts ----
+            # ---- Validate & save artifacts ----
             self.save_artifact("strategy_signals.parquet", signals_df)
             self.save_artifact("strategy_explain.json", explain)
+            _validate_stop_schema(stop_df)
             self.save_artifact("stop_series.parquet", stop_df)
 
             # Summary stats for output.json

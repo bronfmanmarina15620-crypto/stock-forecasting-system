@@ -21,6 +21,36 @@ from typing import Dict, Any
 from .base_agent import BaseAgent
 from determinism import content_hash_sha256
 
+_VALID_ACTIONS = {"ENTER", "ABSTAIN"}
+
+
+def _validate_decision_action(decision: Dict[str, Any]) -> None:
+    """Validate decision_action invariants for Phase 2.
+
+    Raises ValueError on any violation:
+    - action must be ENTER or ABSTAIN (long-only, no EXIT/UNKNOWN)
+    - ENTER requires position == 1
+    - ABSTAIN requires non-empty "because" list
+    """
+    action = decision.get("action")
+    if action not in _VALID_ACTIONS:
+        raise ValueError(
+            f"decision_action invalid action: '{action}'. "
+            f"Must be one of {_VALID_ACTIONS}"
+        )
+    if action == "ENTER":
+        if decision.get("position") != 1:
+            raise ValueError(
+                f"decision_action ENTER requires position=1, "
+                f"got position={decision.get('position')}"
+            )
+    if action == "ABSTAIN":
+        because = decision.get("because", [])
+        if not because:
+            raise ValueError(
+                "decision_action ABSTAIN requires non-empty 'because' list"
+            )
+
 
 class DecisionRiskAgent(BaseAgent):
     """Agent responsible for decision making and risk assessment."""
@@ -43,14 +73,24 @@ class DecisionRiskAgent(BaseAgent):
             ):
                 return {"status": "FAILED", "error": "Dependencies failed"}
 
+            # Search legacy_ml/ subfolder first, then top-level, then empty
             predictions_path = os.path.join(
-                self.run_dir, "BacktestAgent", "predictions_oos.parquet"
+                self.run_dir, "BacktestAgent", "legacy_ml",
+                "predictions_oos.parquet",
             )
             if not os.path.exists(predictions_path):
-                raise FileNotFoundError(
-                    f"predictions_oos.parquet not found at {predictions_path}"
+                predictions_path = os.path.join(
+                    self.run_dir, "BacktestAgent",
+                    "predictions_oos.parquet",
                 )
-            predictions = pd.read_parquet(predictions_path)
+            if os.path.exists(predictions_path):
+                predictions = pd.read_parquet(predictions_path)
+            else:
+                predictions = pd.DataFrame(
+                    columns=[
+                        "date", "y_true", "y_pred_proba", "regime", "price",
+                    ]
+                )
 
             # ----------------------------------------------------------
             # Load strategy signals (Phase 2)
@@ -87,6 +127,9 @@ class DecisionRiskAgent(BaseAgent):
 
             # Generate abstain stats
             abstain_stats = self._generate_abstain_stats(signals, decision_explain)
+
+            # Validate decision invariants before persisting
+            _validate_decision_action(decision_action)
 
             # Embed deterministic content fingerprint
             decision_action["content_hash_sha256"] = content_hash_sha256(
@@ -193,14 +236,21 @@ class DecisionRiskAgent(BaseAgent):
             "strategy_return"
         ]
         ev_per_signal = float(enter_returns.mean()) if len(enter_returns) > 0 else 0.0
-        max_dd = float(strategy_pnl["drawdown"].min())
-
-        signals["date"] = pd.to_datetime(signals["date"])
-        signals_per_month = (
-            signals.groupby(signals["date"].dt.to_period("M"))["action"]
-            .apply(lambda x: (x == "ENTER").sum())
-            .mean()
+        max_dd = (
+            float(strategy_pnl["drawdown"].min())
+            if len(strategy_pnl) > 0 else 0.0
         )
+
+        if total_days > 0:
+            signals["date"] = pd.to_datetime(signals["date"])
+            signals_per_month = float(
+                signals.groupby(signals["date"].dt.to_period("M"))["action"]
+                .apply(lambda x: (x == "ENTER").sum())
+                .mean()
+            )
+        else:
+            signals_per_month = 0.0
+
         win_rate = (
             float((enter_returns > 0).mean()) if len(enter_returns) > 0 else 0.0
         )
@@ -209,7 +259,7 @@ class DecisionRiskAgent(BaseAgent):
             "total_days": total_days,
             "enter_days": enter_days,
             "abstain_days": abstain_days,
-            "abstain_percentage": float(abstain_days / total_days * 100),
+            "abstain_percentage": float(abstain_days / total_days * 100) if total_days > 0 else 100.0,
             "signals_per_month": float(signals_per_month),
             "expected_value_per_signal": ev_per_signal,
             "max_drawdown": max_dd,
@@ -262,6 +312,7 @@ class DecisionRiskAgent(BaseAgent):
             "action": action,
             "regime_ok": bool(last["regime_ok"]) if not pd.isna(last["regime_ok"]) else False,
             "range_high_vol": bool(last["range_high_vol"]) if not pd.isna(last["range_high_vol"]) else False,
+            "ma150_trend_ok": bool(last["ma150_trend_ok"]) if not pd.isna(last["ma150_trend_ok"]) else False,
             "entry_signal": bool(last["entry_signal"]),
             "exit_signal": bool(last["exit_signal"]),
             "position": position,

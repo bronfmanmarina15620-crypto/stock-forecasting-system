@@ -17,4 +17,13 @@ costs:
   spread: 2.0            # BacktestConfig.spread_bps
   slippage: 3.0          # BacktestConfig.slippage_bps
 
-risk_per_trade: 0.005    # placeholder for Phase 4
+risk_per_trade: 0.005    # Phase 4: fraction of equity risked per trade
+
+# Phase 4 risk management — wired to BacktestConfig.
+# Override via BacktestConfig if needed; values here for documentation.
+risk_management:
+  capital_base: 100000.0       # starting equity for backtest
+  max_leverage: 1.0            # long-only; exposure <= 1.0 * equity
+  max_position_pct: 0.25       # cap position notional to 25% equity
+  min_stop_pct: 0.01           # avoid absurdly tiny stops (1% of price)
+  max_stop_pct: 0.20           # avoid absurdly wide stops (20% of price)

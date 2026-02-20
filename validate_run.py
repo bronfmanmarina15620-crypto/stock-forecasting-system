@@ -33,12 +33,11 @@ except ImportError:
 
 REQUIRED_ARTIFACTS = {
     "BacktestAgent": [
-        "predictions_oos.parquet",
-        "sanity_tests.json",
         "trades.parquet",
         "pnl_series.parquet",
         "metrics.json",
         "costs_assumptions.json",
+        "risk_explain.json",
     ],
     "DecisionRiskAgent": [
         "signals.csv",
@@ -62,6 +61,24 @@ REQUIRED_METRICS_FIELDS = [
     "max_drawdown",
     "win_rate",
     "avg_trades_per_month",
+    # Phase 3
+    "total_return",
+    "cagr",
+    "sharpe",
+    "exposure_time_pct",
+    "num_trades",
+    "days_regime_ok_pct",
+    "days_range_high_vol_pct",
+    # Phase 4 risk
+    "avg_exposure_pct",
+    "max_exposure_pct",
+    "avg_r_multiple",
+    "median_r_multiple",
+    "worst_r_multiple",
+    "best_r_multiple",
+    "pct_trades_skipped_due_to_stop_bounds",
+    "pct_trades_capped_by_max_position",
+    "realized_risk_per_trade_avg",
 ]
 
 REQUIRED_ABSTAIN_STATS_FIELDS = [
@@ -144,11 +161,13 @@ def validate_sanity_tests(run_path: Path) -> Tuple[List[str], List[str]]:
     print("STEP 2: Validating Sanity Tests")
     print("=" * 60)
 
-    sanity_path = run_path / "BacktestAgent" / "sanity_tests.json"
-
+    # Search legacy_ml/ subfolder first, then top-level (backward compat)
+    sanity_path = run_path / "BacktestAgent" / "legacy_ml" / "sanity_tests.json"
     if not sanity_path.exists():
-        fail_reasons.append(f"Missing sanity_tests.json: {sanity_path}")
-        print("[X] sanity_tests.json not found")
+        sanity_path = run_path / "BacktestAgent" / "sanity_tests.json"
+    if not sanity_path.exists():
+        warnings.append("sanity_tests.json not found (legacy ML artifacts optional)")
+        print("[!] sanity_tests.json not found (legacy ML artifacts optional)")
         return fail_reasons, warnings
 
     try:
@@ -287,11 +306,13 @@ def validate_oos_samples(run_path: Path) -> Tuple[List[str], List[str]]:
     print("STEP 5: Validating OOS Sample Size")
     print("=" * 60)
 
-    pred_path = run_path / "BacktestAgent" / "predictions_oos.parquet"
-
+    # Search legacy_ml/ subfolder first, then top-level (backward compat)
+    pred_path = run_path / "BacktestAgent" / "legacy_ml" / "predictions_oos.parquet"
     if not pred_path.exists():
-        fail_reasons.append(f"Missing predictions_oos.parquet: {pred_path}")
-        print("[X] predictions_oos.parquet not found")
+        pred_path = run_path / "BacktestAgent" / "predictions_oos.parquet"
+    if not pred_path.exists():
+        warnings.append("predictions_oos.parquet not found (legacy ML artifacts optional)")
+        print("[!] predictions_oos.parquet not found (legacy ML artifacts optional)")
         return fail_reasons, warnings
 
     if not PYARROW_AVAILABLE:

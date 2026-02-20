@@ -89,10 +89,10 @@ class DashboardAgent(BaseAgent):
         decision_action = decision_output["decision_action"]
         portfolio_plan = portfolio_output["portfolio_plan"]
         risk_summary = portfolio_output["risk_summary"]
-        metrics = backtest_output["metrics"]["overall"]
+        ml_overall = backtest_output.get("metrics", {}).get("legacy_ml", {})
 
         # Phase 2 strategy fields
-        regime_ok = decision_action.get("regime_ok", False)
+        ma150_trend_ok = decision_action.get("ma150_trend_ok", False)
         rhv_block = decision_action.get("range_high_vol", False)
         entry_ready = decision_action.get("entry_signal", False)
         stop_today = decision_action.get("stop_price")
@@ -100,6 +100,9 @@ class DashboardAgent(BaseAgent):
 
         stop_str = f"{stop_today:.4f}" if stop_today is not None else "N/A (flat)"
         because_html = "".join(f"<li>{b}</li>" for b in because) if because else "<li>No reasons available</li>"
+
+        # Phase 3 backtest metrics
+        bt_metrics = backtest_output.get("metrics", {})
 
         html = f"""
 <!DOCTYPE html>
@@ -223,7 +226,7 @@ class DashboardAgent(BaseAgent):
             <div style="margin-top: 15px;">
                 <div class="metric">
                     <span class="metric-label">MA150 Trend OK:</span>
-                    <span class="metric-value">{regime_ok}</span>
+                    <span class="metric-value">{ma150_trend_ok}</span>
                 </div>
                 <div class="metric">
                     <span class="metric-label">RANGE_HIGH_VOL Block:</span>
@@ -244,19 +247,87 @@ class DashboardAgent(BaseAgent):
             </div>
         </div>
 
-        <h2>Backtest Performance</h2>
+        <h2>Backtest Performance (Phase 3)</h2>
+        <div class="card">
+            <div class="metric">
+                <span class="metric-label">Total Return:</span>
+                <span class="metric-value">{bt_metrics.get('total_return', 0):.2%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Max Drawdown:</span>
+                <span class="metric-value">{bt_metrics.get('max_drawdown', 0):.2%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Sharpe:</span>
+                <span class="metric-value">{bt_metrics.get('sharpe', 0):.2f}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Trades:</span>
+                <span class="metric-value">{bt_metrics.get('num_trades', 0)}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Win Rate:</span>
+                <span class="metric-value">{bt_metrics.get('win_rate', 0):.1%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Exposure:</span>
+                <span class="metric-value">{bt_metrics.get('exposure_time_pct', 0):.1f}%</span>
+            </div>
+        </div>
+
+        <h2>Risk Management (Phase 4)</h2>
+        <div class="card">
+            <div class="metric">
+                <span class="metric-label">Avg Exposure:</span>
+                <span class="metric-value">{bt_metrics.get('avg_exposure_pct', 0):.2%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Max Exposure:</span>
+                <span class="metric-value">{bt_metrics.get('max_exposure_pct', 0):.2%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Avg R-Multiple:</span>
+                <span class="metric-value">{bt_metrics.get('avg_r_multiple', 0):.2f}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Worst R-Multiple:</span>
+                <span class="metric-value">{bt_metrics.get('worst_r_multiple', 0):.2f}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Best R-Multiple:</span>
+                <span class="metric-value">{bt_metrics.get('best_r_multiple', 0):.2f}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Median R-Multiple:</span>
+                <span class="metric-value">{bt_metrics.get('median_r_multiple', 0):.2f}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Trades Skipped (stop bounds):</span>
+                <span class="metric-value">{bt_metrics.get('pct_trades_skipped_due_to_stop_bounds', 0):.1%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Trades Capped (max position):</span>
+                <span class="metric-value">{bt_metrics.get('pct_trades_capped_by_max_position', 0):.1%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Realized Risk/Trade Avg:</span>
+                <span class="metric-value">{bt_metrics.get('realized_risk_per_trade_avg', 0):.4f}</span>
+            </div>
+        </div>
+
+        <h2>ML Validation</h2>
         <div class="card">
             <div class="metric">
                 <span class="metric-label">AUC:</span>
-                <span class="metric-value">{metrics['auc']:.3f}</span>
+                <span class="metric-value">{ml_overall.get('auc', 'N/A')}</span>
             </div>
             <div class="metric">
                 <span class="metric-label">Base Rate:</span>
-                <span class="metric-value">{metrics['base_rate']:.1%}</span>
+                <span class="metric-value">{ml_overall.get('base_rate', 'N/A')}</span>
             </div>
             <div class="metric">
                 <span class="metric-label">Total Samples:</span>
-                <span class="metric-value">{metrics['total_samples']}</span>
+                <span class="metric-value">{ml_overall.get('total_samples', 'N/A')}</span>
             </div>
         </div>
 
@@ -347,14 +418,15 @@ class DashboardAgent(BaseAgent):
         return html
 
     def _generate_json_report(self, **kwargs) -> Dict[str, Any]:
-        """Generate JSON summary report with Phase 2 strategy fields."""
+        """Generate JSON summary report with Phase 2 + Phase 3 fields."""
         decision_output = kwargs["decision_output"]
         strategy_output = kwargs["strategy_output"]
+        backtest_output = kwargs["backtest_output"]
         decision_action = decision_output.get("decision_action", {})
 
         # Phase 2 fields for "today"
         strategy_today = {
-            "ma150_trend_ok": decision_action.get("regime_ok", False),
+            "ma150_trend_ok": decision_action.get("ma150_trend_ok", False),
             "range_high_vol_block": decision_action.get("range_high_vol", False),
             "range_high_vol_reason": (
                 next(
@@ -367,11 +439,44 @@ class DashboardAgent(BaseAgent):
             "because": decision_action.get("because", []),
         }
 
+        # Phase 3 backtest summary
+        bt_metrics = backtest_output.get("metrics", {})
+        backtest_section = {
+            "status": backtest_output.get("status", "UNKNOWN"),
+            "predictions_path": backtest_output.get("predictions_path"),
+            "metrics": bt_metrics,
+            "summary": {
+                "total_return": bt_metrics.get("total_return"),
+                "max_drawdown": bt_metrics.get("max_drawdown"),
+                "sharpe": bt_metrics.get("sharpe"),
+                "num_trades": bt_metrics.get("num_trades"),
+                "win_rate": bt_metrics.get("win_rate"),
+                "exposure_time_pct": bt_metrics.get("exposure_time_pct"),
+                "days_range_high_vol_pct": bt_metrics.get(
+                    "days_range_high_vol_pct"),
+                "last_trade_summary": backtest_output.get(
+                    "last_trade_summary"),
+                # Phase 4 risk
+                "avg_exposure_pct": bt_metrics.get("avg_exposure_pct"),
+                "max_exposure_pct": bt_metrics.get("max_exposure_pct"),
+                "avg_r_multiple": bt_metrics.get("avg_r_multiple"),
+                "median_r_multiple": bt_metrics.get("median_r_multiple"),
+                "worst_r_multiple": bt_metrics.get("worst_r_multiple"),
+                "best_r_multiple": bt_metrics.get("best_r_multiple"),
+                "pct_trades_skipped_due_to_stop_bounds": bt_metrics.get(
+                    "pct_trades_skipped_due_to_stop_bounds"),
+                "pct_trades_capped_by_max_position": bt_metrics.get(
+                    "pct_trades_capped_by_max_position"),
+                "realized_risk_per_trade_avg": bt_metrics.get(
+                    "realized_risk_per_trade_avg"),
+            },
+        }
+
         return {
             "ticker": self.config.ticker,
             "run_timestamp": datetime.now().isoformat(),
             "data": kwargs["data_output"],
-            "backtest": kwargs["backtest_output"],
+            "backtest": backtest_section,
             "strategy": {
                 "status": strategy_output.get("status", "UNKNOWN"),
                 "params": strategy_output.get("params", {}),

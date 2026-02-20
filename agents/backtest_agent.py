@@ -1,78 +1,191 @@
 """
-BacktestAgent - Walk-forward backtesting with full artifact production.
+BacktestAgent - Phase 3 strategy evaluation (default) + optional ML walk-forward.
+
+Phase 3 (signals_only, DEFAULT): Consumes StrategyAgent/strategy_signals.parquet
+as the SINGLE source of truth for trade execution.  No ML imports or execution.
+
+Legacy ML (legacy_ml, opt-in): Retains walk-forward ML validation for
+predictions_oos.parquet and sanity_tests.json (backward compat).
 """
+
+import os
 
 import pandas as pd
 import numpy as np
-from typing import Dict, Any
-import pickle
-from sklearn.metrics import roc_auc_score, brier_score_loss
-from sklearn.linear_model import LogisticRegression
+from typing import Dict, Any, Optional
 from .base_agent import BaseAgent
 from determinism import content_hash_sha256
 
+# Phase 3 schema locks
+REQUIRED_PNL_COLS = ["date", "equity_curve", "daily_return", "position"]
+REQUIRED_TRADES_COLS = [
+    "entry_date", "entry_price", "exit_date", "exit_price",
+    "pnl", "return", "holding_days",
+]
+PHASE4_TRADES_COLS = [
+    "shares", "notional", "exposure_pct", "stop_distance",
+    "stop_pct", "risk_budget", "r_multiple",
+]
+REQUIRED_METRICS_KEYS = [
+    # Backward compat
+    "EV_per_trade", "max_drawdown", "win_rate",
+    "avg_trades_per_month", "total_signals",
+    # Phase 3 performance
+    "total_return", "cagr", "volatility", "sharpe", "exposure_time_pct",
+    # Phase 3 trade stats
+    "num_trades", "avg_trade_return", "median_trade_return",
+    "profit_factor", "avg_holding_days",
+    # Regime diagnostics
+    "days_regime_ok_pct", "days_range_high_vol_pct",
+    "days_abstain_pct", "breakout_entry_count",
+    # Costs
+    "total_costs", "costs_per_trade_avg",
+]
+PHASE4_METRICS_KEYS = [
+    "avg_exposure_pct", "max_exposure_pct",
+    "avg_r_multiple", "median_r_multiple",
+    "worst_r_multiple", "best_r_multiple",
+    "pct_trades_skipped_due_to_stop_bounds",
+    "pct_trades_capped_by_max_position",
+    "realized_risk_per_trade_avg",
+]
+
+# Stub ML metrics for signals_only mode (numeric defaults so formatters work)
+_STUB_ML_METRICS = {
+    'legacy_ml': {
+        'auc': 0.5,
+        'brier_score': 0.5,
+        'base_rate': 0.0,
+        'total_samples': 0,
+    }
+}
+
 
 class BacktestAgent(BaseAgent):
-    """Walk-forward backtesting with realistic costs and sanity checks."""
+    """Phase 3 strategy backtesting with optional ML walk-forward."""
 
     def run(self) -> Dict[str, Any]:
-        """Run walk-forward backtest."""
-        self.logger.info("Starting walk-forward backtest")
+        """Run backtest in configured mode (signals_only | legacy_ml)."""
+        mode = getattr(self.config.backtest, 'backtest_mode', 'signals_only')
+        self.logger.info(f"Backtest mode: {mode}")
+
+        if mode == 'signals_only':
+            return self._run_signals_only()
+        elif mode == 'legacy_ml':
+            return self._run_legacy_ml()
+        else:
+            raise ValueError(
+                f"Unknown backtest_mode: '{mode}'. "
+                f"Must be 'signals_only' or 'legacy_ml'."
+            )
+
+    # ==================================================================
+    # signals_only mode (Phase 3 default)
+    # ==================================================================
+
+    def _run_signals_only(self) -> Dict[str, Any]:
+        """Phase 3+4 signal-driven backtest with position sizing.
+
+        Design invariant: this method (and everything it calls) must NEVER
+        import or invoke sklearn / pickle / ML model code.  Enforced by
+        test_signals_only_does_not_import_or_run_legacy_ml.
+        """
+        self.logger.info("Running signals_only backtest (no ML)")
+        self.logger.info(
+            f"Phase 4 risk sizing: execution=close-to-close (EOD), "
+            f"capital_base={self.config.backtest.capital_base}, "
+            f"risk_per_trade={self.config.strategy.risk_per_trade}"
+        )
 
         try:
-            # Load dependencies
-            model_output = self.load_agent_output('EventModelAgent')
-            regime_output = self.load_agent_output('RegimeAgent')
             data_output = self.load_agent_output('DataAgent')
-            feature_output = self.load_agent_output('FeatureAgent')
 
-            # Load data
-            with open(model_output['model_path'], 'rb') as f:
-                model = pickle.load(f)
+            strategy_signals = pd.read_parquet(
+                os.path.join(self.run_dir, 'StrategyAgent',
+                             'strategy_signals.parquet')
+            )
+            close = pd.read_parquet(data_output['data_path'])['Close']
 
-            features = pd.read_parquet(feature_output['features_path'])
-            regimes = pd.read_parquet(regime_output['regime_path'])['regime']
-            prices = pd.read_parquet(data_output['data_path'])['Close']
+            emit_stubs = getattr(
+                self.config.backtest, 'emit_legacy_stubs', True
+            )
+            ml_input = _STUB_ML_METRICS if emit_stubs else {}
 
-            # Run backtest
-            predictions = self._simple_backtest(model, features, regimes, prices)
+            # Phase 4: sized backtest (single-pass)
+            trades, pnl_series, risk_explain, sizing_stats = (
+                self._build_sized_backtest(strategy_signals, close)
+            )
 
-            # Calculate metrics
-            metrics = self._calculate_metrics(predictions)
+            metrics = self._calculate_strategy_metrics(
+                strategy_signals, close, trades, pnl_series, ml_input,
+                actual_position=pnl_series['position'],
+            )
 
-            # Generate trades from predictions
-            trades = self._generate_trades(predictions)
+            # Phase 4 risk metrics
+            risk_metrics = self._calculate_risk_metrics(
+                trades, pnl_series, sizing_stats,
+            )
+            metrics.update(risk_metrics)
 
-            # Generate PnL series
-            pnl_series = self._generate_pnl_series(predictions)
-
-            # Generate costs assumptions
+            metrics['content_hash_sha256'] = content_hash_sha256(metrics)
             costs_assumptions = self._generate_costs_assumptions()
 
-            # Run sanity tests
-            sanity_results = self._run_sanity_tests(features, prices, regimes)
-
-            # Embed deterministic content fingerprint
-            metrics['content_hash_sha256'] = content_hash_sha256(metrics)
-
-            # Save all required artifacts
-            self.save_artifact('predictions_oos.parquet', predictions)
-            self.save_artifact('metrics.json', metrics)
+            # Phase 3 artifacts (always written at top level)
+            self.save_artifact('costs_assumptions.json', costs_assumptions)
             self.save_artifact('trades.parquet', trades)
             self.save_artifact('pnl_series.parquet', pnl_series)
-            self.save_artifact('costs_assumptions.json', costs_assumptions)
-            self.save_artifact('sanity_tests.json', sanity_results)
-            self.save_artifact('backtest_report.html',
-                               self._generate_backtest_html(metrics, sanity_results))
+            self.save_artifact('metrics.json', metrics)
+
+            # Phase 4 artifact
+            self.save_artifact('risk_explain.json', risk_explain)
+
+            # Legacy ML stubs — isolated under legacy_ml/ subfolder
+            stub_sanity = {}
+            if emit_stubs:
+                legacy_dir = os.path.join(self.agent_dir, 'legacy_ml')
+                os.makedirs(legacy_dir, exist_ok=True)
+
+                stub_predictions = pd.DataFrame(
+                    columns=[
+                        'date', 'y_true', 'y_pred_proba', 'regime', 'price',
+                    ]
+                )
+                stub_sanity = {
+                    'shuffled_labels_auc': 0.50,
+                    'future_shift_auc': 0.50,
+                    'status': 'SKIPPED',
+                    'reason':
+                        'signals_only mode: ML sanity tests not applicable',
+                }
+                self.save_artifact(
+                    'legacy_ml/predictions_oos.parquet', stub_predictions,
+                )
+                self.save_artifact(
+                    'legacy_ml/sanity_tests.json', stub_sanity,
+                )
+
+            self.save_artifact(
+                'backtest_report.html',
+                self._generate_backtest_html(metrics, stub_sanity),
+            )
+
+            last_trade_summary = None
+            if len(trades) > 0:
+                last_trade_summary = trades.iloc[-1].to_dict()
 
             output = {
                 'status': 'SUCCESS',
-                'predictions_path': self.get_artifact_path('predictions_oos.parquet'),
-                'metrics': metrics
+                'metrics': metrics,
+                'last_trade_summary': last_trade_summary,
             }
 
             self.save_output(output)
-            self.logger.info("Walk-forward backtest complete")
+            n_trades = len(trades)
+            total_ret = metrics.get('total_return', 0)
+            self.logger.info(
+                f"Backtest complete (signals_only): {n_trades} trades, "
+                f"total_return={total_ret:.2%}"
+            )
             return output
 
         except Exception as e:
@@ -80,6 +193,412 @@ class BacktestAgent(BaseAgent):
             import traceback
             traceback.print_exc()
             return {'status': 'FAILED', 'error': str(e)}
+
+    # ==================================================================
+    # Phase 4: Sized backtest engine (signals_only only)
+    # ==================================================================
+
+    def _build_sized_backtest(
+        self,
+        strategy_signals: pd.DataFrame,
+        close: pd.Series,
+    ):
+        """Single-pass position-sized backtest for signals_only mode.
+
+        Uses risk_per_trade and stop_price from strategy signals to compute
+        deterministic position sizes.  Tracks dollar equity from capital_base.
+
+        Returns
+        -------
+        trades_df : pd.DataFrame
+            Phase 3 + Phase 4 columns for each completed trade.
+        pnl_df : pd.DataFrame
+            Daily equity curve, returns, position, and exposure.
+        risk_explain : dict
+            Mapping trade_id -> list of sizing/skip/cap reasons.
+        sizing_stats : dict
+            Counters for skipped, capped, and executed trades.
+        """
+        cfg = self.config.backtest
+        risk_per_trade = self.config.strategy.risk_per_trade
+        capital_base = cfg.capital_base
+        max_position_pct = cfg.max_position_pct
+        max_leverage = cfg.max_leverage
+        min_stop_pct = cfg.min_stop_pct
+        max_stop_pct = cfg.max_stop_pct
+        one_way_cost = self._get_one_way_cost()
+        round_trip_cost_pct = one_way_cost * 2
+
+        n = len(strategy_signals)
+        close_aligned = close.reindex(strategy_signals.index)
+        stop_prices = strategy_signals['stop_price']
+
+        # Output arrays
+        equity_arr = np.zeros(n)
+        daily_return_arr = np.zeros(n)
+        position_arr = np.zeros(n, dtype=np.int64)
+        exposure_pct_arr = np.zeros(n)
+
+        trades = []
+        risk_explain: Dict[str, Any] = {}
+
+        # Sizing stats counters
+        total_entry_signals = 0
+        skipped_stop_bounds = 0
+        skipped_invalid_stop = 0
+        skipped_zero_shares = 0
+        capped_count = 0
+        executed_count = 0
+
+        # State
+        equity = capital_base
+        current_shares = 0
+        in_trade = False
+        trade_id = 0
+        entry_date = None
+        entry_price = 0.0
+        entry_equity = 0.0
+        entry_risk_budget = 0.0
+        entry_stop_distance = 0.0
+        entry_stop_pct = 0.0
+        entry_reasons: list = []
+
+        for i in range(n):
+            idx = strategy_signals.index[i]
+            entry_sig = bool(strategy_signals['entry_signal'].iloc[i])
+            exit_sig = bool(strategy_signals['exit_signal'].iloc[i])
+            price = float(close_aligned.iloc[i])
+            stop_val = stop_prices.iloc[i]
+            stop_val = float(stop_val) if not pd.isna(stop_val) else np.nan
+
+            prev_equity = equity
+
+            # --- Earn return from yesterday's position ---
+            if i > 0 and current_shares > 0:
+                prev_price = float(close_aligned.iloc[i - 1])
+                equity += current_shares * (price - prev_price)
+
+            # --- Process exit (before entry) ---
+            if exit_sig and in_trade and current_shares > 0:
+                exit_cost_dollars = current_shares * price * one_way_cost
+                equity -= exit_cost_dollars
+
+                gross_pnl_per_share = price - entry_price
+                entry_cost_dollars = (
+                    current_shares * entry_price * one_way_cost
+                )
+                realized_dollar_pnl = (
+                    current_shares * gross_pnl_per_share
+                    - entry_cost_dollars - exit_cost_dollars
+                )
+                net_return_pct = (
+                    (price / entry_price - 1) - round_trip_cost_pct
+                    if entry_price > 0 else 0.0
+                )
+                r_mult = (
+                    realized_dollar_pnl / entry_risk_budget
+                    if entry_risk_budget > 0 else 0.0
+                )
+
+                dt_str = lambda d: (
+                    str(d.date()) if hasattr(d, 'date') else str(d)
+                )
+                trades.append({
+                    # Phase 3 columns (backward compat)
+                    'entry_date': dt_str(entry_date),
+                    'entry_price': entry_price,
+                    'exit_date': dt_str(idx),
+                    'exit_price': price,
+                    'pnl': gross_pnl_per_share,
+                    'return': net_return_pct,
+                    'holding_days': (idx - entry_date).days,
+                    # Phase 4 columns
+                    'shares': current_shares,
+                    'notional': current_shares * entry_price,
+                    'exposure_pct': (
+                        (current_shares * entry_price) / entry_equity
+                        if entry_equity > 0 else 0.0
+                    ),
+                    'stop_distance': entry_stop_distance,
+                    'stop_pct': entry_stop_pct,
+                    'risk_budget': entry_risk_budget,
+                    'r_multiple': r_mult,
+                })
+
+                risk_explain[f'trade_{trade_id}'] = entry_reasons
+                trade_id += 1
+                in_trade = False
+                current_shares = 0
+
+            # --- Process entry ---
+            if entry_sig and not in_trade:
+                total_entry_signals += 1
+                reasons: list = []
+                stop_distance = (
+                    price - stop_val if not np.isnan(stop_val) else 0.0
+                )
+                stop_pct_val = (
+                    stop_distance / price if price > 0 else 0.0
+                )
+
+                skip = False
+
+                # Guardrail: invalid stop distance
+                if np.isnan(stop_val) or stop_distance <= 0:
+                    reasons.append(
+                        f"SKIPPED: invalid stop_distance="
+                        f"{stop_distance:.4f} "
+                        f"(entry={price:.4f}, stop={stop_val})"
+                    )
+                    risk_explain[f'trade_{trade_id}_skipped'] = reasons
+                    trade_id += 1
+                    skipped_invalid_stop += 1
+                    skip = True
+
+                # Guardrail: stop_pct too small
+                elif stop_pct_val < min_stop_pct:
+                    reasons.append(
+                        f"SKIPPED: stop_pct={stop_pct_val:.4f} "
+                        f"< min_stop_pct={min_stop_pct}"
+                    )
+                    risk_explain[f'trade_{trade_id}_skipped'] = reasons
+                    trade_id += 1
+                    skipped_stop_bounds += 1
+                    skip = True
+
+                # Guardrail: stop_pct too large
+                elif stop_pct_val > max_stop_pct:
+                    reasons.append(
+                        f"SKIPPED: stop_pct={stop_pct_val:.4f} "
+                        f"> max_stop_pct={max_stop_pct}"
+                    )
+                    risk_explain[f'trade_{trade_id}_skipped'] = reasons
+                    trade_id += 1
+                    skipped_stop_bounds += 1
+                    skip = True
+
+                if not skip:
+                    equity_at_entry = equity
+                    risk_budget = risk_per_trade * equity_at_entry
+                    raw_shares = int(risk_budget / stop_distance)
+
+                    if raw_shares <= 0:
+                        reasons.append(
+                            f"SKIPPED: computed shares=0 "
+                            f"(risk_budget={risk_budget:.2f}, "
+                            f"stop_dist={stop_distance:.4f})"
+                        )
+                        risk_explain[
+                            f'trade_{trade_id}_skipped'
+                        ] = reasons
+                        trade_id += 1
+                        skipped_zero_shares += 1
+                    else:
+                        notional = raw_shares * price
+                        exposure = (
+                            notional / equity_at_entry
+                            if equity_at_entry > 0 else 0.0
+                        )
+
+                        capped = False
+                        cap_limit = min(max_position_pct, max_leverage)
+                        if exposure > cap_limit:
+                            raw_shares = int(
+                                cap_limit * equity_at_entry / price
+                            )
+                            notional = raw_shares * price
+                            exposure = (
+                                notional / equity_at_entry
+                                if equity_at_entry > 0 else 0.0
+                            )
+                            capped = True
+
+                        if raw_shares <= 0:
+                            reasons.append(
+                                "SKIPPED: shares=0 after position cap"
+                            )
+                            risk_explain[
+                                f'trade_{trade_id}_skipped'
+                            ] = reasons
+                            trade_id += 1
+                            skipped_zero_shares += 1
+                        else:
+                            reasons.append(
+                                f"SIZED: equity={equity_at_entry:.2f}, "
+                                f"risk_budget={risk_budget:.2f}, "
+                                f"stop_dist={stop_distance:.4f}, "
+                                f"stop_pct={stop_pct_val:.4f}, "
+                                f"shares={raw_shares}, "
+                                f"notional={notional:.2f}, "
+                                f"exposure_pct={exposure:.4f}"
+                            )
+                            if capped:
+                                reasons.append(
+                                    f"CAPPED: exposure reduced to "
+                                    f"{cap_limit:.2%} "
+                                    f"(max_position_pct="
+                                    f"{max_position_pct}, "
+                                    f"max_leverage={max_leverage})"
+                                )
+                                capped_count += 1
+
+                            # Apply entry cost
+                            entry_cost = (
+                                raw_shares * price * one_way_cost
+                            )
+                            equity -= entry_cost
+
+                            in_trade = True
+                            current_shares = raw_shares
+                            entry_date = idx
+                            entry_price = price
+                            entry_equity = equity_at_entry
+                            entry_risk_budget = risk_budget
+                            entry_stop_distance = stop_distance
+                            entry_stop_pct = stop_pct_val
+                            entry_reasons = reasons.copy()
+                            executed_count += 1
+
+            # --- Record daily state ---
+            equity_arr[i] = equity
+            position_arr[i] = 1 if current_shares > 0 else 0
+
+            if current_shares > 0 and equity > 0:
+                exposure_pct_arr[i] = (current_shares * price) / equity
+
+            if i == 0 or prev_equity <= 0:
+                daily_return_arr[i] = 0.0
+            else:
+                daily_return_arr[i] = (equity - prev_equity) / prev_equity
+
+        # --- Build output DataFrames ---
+        all_trades_cols = REQUIRED_TRADES_COLS + PHASE4_TRADES_COLS
+        if not trades:
+            trades_df = pd.DataFrame(columns=all_trades_cols)
+        else:
+            trades_df = pd.DataFrame(trades)[all_trades_cols]
+
+        pnl_df = pd.DataFrame({
+            'date': strategy_signals.index,
+            'equity_curve': equity_arr,
+            'daily_return': daily_return_arr,
+            'position': position_arr,
+            'exposure_pct': exposure_pct_arr,
+        })
+
+        sizing_stats = {
+            'total_entry_signals': total_entry_signals,
+            'skipped_stop_bounds': skipped_stop_bounds,
+            'skipped_invalid_stop': skipped_invalid_stop,
+            'skipped_zero_shares': skipped_zero_shares,
+            'capped_count': capped_count,
+            'executed_count': executed_count,
+        }
+
+        self.logger.info(
+            f"Sized backtest: {executed_count} trades executed, "
+            f"{skipped_stop_bounds + skipped_invalid_stop + skipped_zero_shares} skipped, "
+            f"{capped_count} capped"
+        )
+
+        return trades_df, pnl_df, risk_explain, sizing_stats
+
+    # ==================================================================
+    # legacy_ml mode (opt-in backward compat)
+    # ==================================================================
+
+    def _run_legacy_ml(self) -> Dict[str, Any]:
+        """Walk-forward ML validation + Phase 3 strategy backtest."""
+        self.logger.info("Running legacy_ml backtest (ML walk-forward enabled)")
+
+        import pickle  # lazy: only in legacy_ml
+
+        try:
+            # ML walk-forward
+            model_output = self.load_agent_output('EventModelAgent')
+            regime_output = self.load_agent_output('RegimeAgent')
+            data_output = self.load_agent_output('DataAgent')
+            feature_output = self.load_agent_output('FeatureAgent')
+
+            with open(model_output['model_path'], 'rb') as f:
+                model = pickle.load(f)
+
+            features = pd.read_parquet(feature_output['features_path'])
+            regimes = pd.read_parquet(regime_output['regime_path'])['regime']
+            prices = pd.read_parquet(data_output['data_path'])['Close']
+
+            predictions = self._simple_backtest(model, features, regimes, prices)
+            ml_metrics = self._calculate_ml_metrics(predictions)
+            sanity_results = self._run_sanity_tests(features, prices, regimes)
+            costs_assumptions = self._generate_costs_assumptions()
+
+            self.save_artifact('predictions_oos.parquet', predictions)
+            self.save_artifact('sanity_tests.json', sanity_results)
+            self.save_artifact('costs_assumptions.json', costs_assumptions)
+
+            # Phase 3: Strategy-based backtest
+            strategy_signals = pd.read_parquet(
+                os.path.join(self.run_dir, 'StrategyAgent',
+                             'strategy_signals.parquet')
+            )
+            close = pd.read_parquet(data_output['data_path'])['Close']
+
+            trades = self._build_strategy_trades(strategy_signals, close)
+            pnl_series = self._build_strategy_pnl(strategy_signals, close)
+            metrics = self._calculate_strategy_metrics(
+                strategy_signals, close, trades, pnl_series, ml_metrics
+            )
+
+            # Phase 4 stubs (risk sizing not applicable in legacy_ml mode)
+            for key in PHASE4_METRICS_KEYS:
+                metrics[key] = 0.0
+
+            metrics['content_hash_sha256'] = content_hash_sha256(metrics)
+
+            self.save_artifact('trades.parquet', trades)
+            self.save_artifact('pnl_series.parquet', pnl_series)
+            self.save_artifact('metrics.json', metrics)
+
+            # Phase 4 stub artifact
+            self.save_artifact('risk_explain.json', {
+                '_note': 'Phase 4 risk sizing not applicable in legacy_ml mode',
+            })
+
+            self.save_artifact(
+                'backtest_report.html',
+                self._generate_backtest_html(metrics, sanity_results),
+            )
+
+            last_trade_summary = None
+            if len(trades) > 0:
+                last_trade_summary = trades.iloc[-1].to_dict()
+
+            output = {
+                'status': 'SUCCESS',
+                'predictions_path': self.get_artifact_path(
+                    'predictions_oos.parquet'),
+                'metrics': metrics,
+                'last_trade_summary': last_trade_summary,
+            }
+
+            self.save_output(output)
+            n_trades = len(trades)
+            total_ret = metrics.get('total_return', 0)
+            self.logger.info(
+                f"Backtest complete (legacy_ml): {n_trades} trades, "
+                f"total_return={total_ret:.2%}"
+            )
+            return output
+
+        except Exception as e:
+            self.logger.error(f"Backtest failed: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return {'status': 'FAILED', 'error': str(e)}
+
+    # ------------------------------------------------------------------
+    # ML walk-forward (legacy_ml only)
+    # ------------------------------------------------------------------
 
     def _simple_backtest(self, model, features, regimes, prices):
         """Walk-forward backtest with strict chronological separation."""
@@ -149,17 +668,18 @@ class BacktestAgent(BaseAgent):
         self.logger.info(f"Created {len(predictions_df)} OOS predictions")
         return predictions_df
 
-    def _calculate_metrics(self, predictions: pd.DataFrame) -> Dict[str, Any]:
-        """Calculate comprehensive metrics including required fields."""
+    def _calculate_ml_metrics(
+        self, predictions: pd.DataFrame
+    ) -> Dict[str, Any]:
+        """Calculate ML-only metrics (AUC, Brier) for backward compat."""
+        from sklearn.metrics import roc_auc_score, brier_score_loss  # lazy
+
         if len(predictions) == 0:
             return {
-                'overall': {'auc': 0.5, 'total_samples': 0},
-                'EV_per_trade': 0.0,
-                'max_drawdown': 0.0,
-                'win_rate': 0.0,
-                'avg_trades_per_month': 0.0,
-                'by_year': [],
-                'by_regime': []
+                'legacy_ml': {
+                    'auc': 0.5, 'brier_score': 0.5,
+                    'base_rate': 0.0, 'total_samples': 0,
+                }
             }
 
         y_true = predictions['y_true'].values
@@ -168,130 +688,336 @@ class BacktestAgent(BaseAgent):
         auc = float(roc_auc_score(y_true, y_pred))
         brier = float(brier_score_loss(y_true, y_pred))
 
-        # Trading cost model
-        commission = self.config.backtest.commission_pct
-        spread = self.config.backtest.spread_bps / 10000
-        slippage = self.config.backtest.slippage_bps / 10000
-        total_friction = commission + spread + slippage
-
-        # Simulate signal-based returns
-        prob_threshold = self.config.decision.probability_threshold
-        allowed_regimes = self.config.decision.allowed_regimes
-
-        enter_mask = (
-            (predictions['y_pred_proba'] > prob_threshold) &
-            (predictions['regime'].isin(allowed_regimes))
-        )
-
-        threshold_pct = self.config.event.threshold_pct / 100.0
-
-        signal_returns = []
-        for _, row in predictions[enter_mask].iterrows():
-            raw_return = row['y_true'] * threshold_pct
-            net_return = raw_return - (total_friction * 2)
-            signal_returns.append(net_return)
-
-        ev_per_trade = float(np.mean(signal_returns)) if signal_returns else 0.0
-        win_rate = float(np.mean([r > 0 for r in signal_returns])) if signal_returns else 0.0
-
-        # Max drawdown from cumulative returns
-        if signal_returns:
-            cum = np.cumprod([1 + r for r in signal_returns])
-            cummax = np.maximum.accumulate(cum)
-            drawdowns = (cum - cummax) / cummax
-            max_dd = float(np.min(drawdowns))
-        else:
-            max_dd = 0.0
-
-        # Avg trades per month
-        if len(predictions) > 0:
-            predictions_dt = pd.to_datetime(predictions['date'])
-            total_months = max(1, (predictions_dt.max() - predictions_dt.min()).days / 30.0)
-            avg_trades_per_month = float(enter_mask.sum() / total_months)
-        else:
-            avg_trades_per_month = 0.0
-
         return {
-            'overall': {
+            'legacy_ml': {
                 'auc': auc,
                 'brier_score': brier,
                 'base_rate': float(y_true.mean()),
-                'total_samples': len(predictions)
-            },
-            'EV_per_trade': ev_per_trade,
-            'max_drawdown': max_dd,
-            'win_rate': win_rate,
-            'avg_trades_per_month': avg_trades_per_month,
-            'total_signals': int(enter_mask.sum()),
-            'by_year': [],
-            'by_regime': []
+                'total_samples': len(predictions),
+            }
         }
 
-    def _generate_trades(self, predictions: pd.DataFrame) -> pd.DataFrame:
-        """Generate trade records from predictions."""
-        if len(predictions) == 0:
-            return pd.DataFrame(columns=[
-                'date', 'action', 'price', 'probability', 'regime',
-                'y_true', 'net_return'
-            ])
+    # ------------------------------------------------------------------
+    # Phase 3: Strategy-based backtest
+    # ------------------------------------------------------------------
 
-        prob_threshold = self.config.decision.probability_threshold
-        allowed_regimes = self.config.decision.allowed_regimes
-
+    def _get_one_way_cost(self) -> float:
+        """One-way trading cost from existing config plumbing."""
         commission = self.config.backtest.commission_pct
         spread = self.config.backtest.spread_bps / 10000
         slippage = self.config.backtest.slippage_bps / 10000
-        total_friction = commission + spread + slippage
-        threshold_pct = self.config.event.threshold_pct / 100.0
+        return commission + spread + slippage
 
+    def _build_strategy_trades(
+        self,
+        strategy_signals: pd.DataFrame,
+        close: pd.Series,
+    ) -> pd.DataFrame:
+        """Build trade records from Phase 2 entry/exit signals.
+
+        Each completed trade: entry_signal -> ... -> exit_signal.
+        Open trades at end of series are NOT included.
+        """
         trades = []
-        for _, row in predictions.iterrows():
-            is_enter = (
-                row['y_pred_proba'] > prob_threshold and
-                row['regime'] in allowed_regimes
+        in_trade = False
+        entry_date = entry_price = None
+        round_trip_cost = self._get_one_way_cost() * 2
+
+        close_aligned = close.reindex(strategy_signals.index)
+
+        for i in range(len(strategy_signals)):
+            idx = strategy_signals.index[i]
+            entry_sig = bool(strategy_signals['entry_signal'].iloc[i])
+            exit_sig = bool(strategy_signals['exit_signal'].iloc[i])
+            price = float(close_aligned.iloc[i])
+
+            if entry_sig and not in_trade:
+                in_trade = True
+                entry_date = idx
+                entry_price = price
+
+            if exit_sig and in_trade:
+                gross_ret = (
+                    (price / entry_price) - 1 if entry_price != 0 else 0.0
+                )
+                net_ret = gross_ret - round_trip_cost
+                dt_str = lambda d: (
+                    str(d.date()) if hasattr(d, 'date') else str(d)
+                )
+                trades.append({
+                    'entry_date': dt_str(entry_date),
+                    'entry_price': entry_price,
+                    'exit_date': dt_str(idx),
+                    'exit_price': price,
+                    'pnl': price - entry_price,
+                    'return': net_ret,
+                    'holding_days': (idx - entry_date).days,
+                })
+                in_trade = False
+
+        if not trades:
+            return pd.DataFrame(
+                columns=REQUIRED_TRADES_COLS,
             )
-            action = 'ENTER' if is_enter else 'ABSTAIN'
-            raw_return = row['y_true'] * threshold_pct
-            net_return = (raw_return - total_friction * 2) if is_enter else 0.0
 
-            trades.append({
-                'date': row['date'],
-                'action': action,
-                'price': row['price'],
-                'probability': row['y_pred_proba'],
-                'regime': row['regime'],
-                'y_true': row['y_true'],
-                'net_return': net_return
-            })
+        return pd.DataFrame(trades)[REQUIRED_TRADES_COLS]
 
-        return pd.DataFrame(trades)
+    def _build_strategy_pnl(
+        self,
+        strategy_signals: pd.DataFrame,
+        close: pd.Series,
+    ) -> pd.DataFrame:
+        """Build daily PnL series from strategy position.
 
-    def _generate_pnl_series(self, predictions: pd.DataFrame) -> pd.DataFrame:
-        """Generate cumulative PnL series."""
-        if len(predictions) == 0:
-            return pd.DataFrame(columns=['date', 'cumulative_return', 'drawdown'])
+        Convention: position[t-1]=1 earns close[t]/close[t-1]-1 on day t.
+        Costs deducted at entry and exit days.
+        """
+        close_aligned = close.reindex(strategy_signals.index)
+        position = strategy_signals['position']
 
-        trades = self._generate_trades(predictions)
-        enter_trades = trades[trades['action'] == 'ENTER'].copy()
+        daily_close_ret = close_aligned.pct_change().fillna(0)
+        prev_position = position.shift(1).fillna(0)
+        daily_return = (daily_close_ret * prev_position).copy()
 
-        if len(enter_trades) == 0:
-            return pd.DataFrame({
-                'date': predictions['date'],
-                'cumulative_return': 1.0,
-                'drawdown': 0.0
-            })
+        # Cost adjustments at entry/exit points
+        one_way_cost = self._get_one_way_cost()
+        daily_return.loc[strategy_signals['entry_signal']] -= one_way_cost
+        daily_return.loc[strategy_signals['exit_signal']] -= one_way_cost
 
-        enter_trades = enter_trades.reset_index(drop=True)
-        enter_trades['cum_return'] = (1 + enter_trades['net_return']).cumprod()
-        enter_trades['cum_max'] = enter_trades['cum_return'].cummax()
-        enter_trades['drawdown'] = (
-            (enter_trades['cum_return'] - enter_trades['cum_max']) /
-            enter_trades['cum_max']
+        equity_curve = (1 + daily_return).cumprod()
+
+        return pd.DataFrame({
+            'date': strategy_signals.index,
+            'equity_curve': equity_curve.values,
+            'daily_return': daily_return.values,
+            'position': position.values,
+        })
+
+    def _calculate_strategy_metrics(
+        self,
+        signals: pd.DataFrame,
+        close: pd.Series,
+        trades_df: pd.DataFrame,
+        pnl_df: pd.DataFrame,
+        ml_metrics: Dict[str, Any],
+        actual_position: Optional[pd.Series] = None,
+    ) -> Dict[str, Any]:
+        """Calculate comprehensive Phase 3 metrics.
+
+        Parameters
+        ----------
+        actual_position : pd.Series, optional
+            If provided (Phase 4 sized backtest), use this for
+            exposure_time_pct and abstain_pct instead of signals['position'].
+        """
+        n = len(signals)
+        position = actual_position if actual_position is not None else signals['position']
+
+        # --- Performance ---
+        equity = pnl_df['equity_curve'].values
+        total_return = (
+            float(equity[-1] / equity[0] - 1)
+            if n > 0 and equity[0] > 0 else 0.0
         )
 
-        return enter_trades[['date', 'cum_return', 'drawdown']].rename(
-            columns={'cum_return': 'cumulative_return'}
+        years = n / 252.0
+        if years > 0 and equity[-1] > 0 and equity[0] > 0:
+            cagr = float((equity[-1] / equity[0]) ** (1 / years) - 1)
+        else:
+            cagr = 0.0
+
+        cummax = np.maximum.accumulate(equity)
+        drawdown = np.where(cummax > 0, (equity - cummax) / cummax, 0.0)
+        max_dd = float(np.min(drawdown)) if n > 0 else 0.0
+
+        daily_returns = pnl_df['daily_return'].values
+        vol = (
+            float(np.std(daily_returns, ddof=1) * np.sqrt(252))
+            if n > 1 else 0.0
         )
+
+        mean_daily = float(np.mean(daily_returns)) if n > 0 else 0.0
+        std_daily = (
+            float(np.std(daily_returns, ddof=1)) if n > 1 else 0.0
+        )
+        sharpe = (
+            float((mean_daily / std_daily) * np.sqrt(252))
+            if std_daily > 0 else 0.0
+        )
+
+        exposure_pct = float(position.sum() / n * 100) if n > 0 else 0.0
+
+        # --- Trade stats ---
+        num_trades = len(trades_df)
+        if num_trades > 0:
+            trade_returns = trades_df['return']
+            win_rate = float((trade_returns > 0).mean())
+            avg_trade_return = float(trade_returns.mean())
+            median_trade_return = float(trade_returns.median())
+            avg_holding = float(trades_df['holding_days'].mean())
+
+            gross_profit = float(trade_returns[trade_returns > 0].sum())
+            gross_loss = float(abs(trade_returns[trade_returns < 0].sum()))
+            if gross_loss > 0:
+                profit_factor = float(gross_profit / gross_loss)
+            elif gross_profit > 0:
+                profit_factor = None  # All winners, JSON null
+            else:
+                profit_factor = 0.0
+        else:
+            win_rate = 0.0
+            avg_trade_return = 0.0
+            median_trade_return = 0.0
+            avg_holding = 0.0
+            profit_factor = 0.0
+
+        # --- Regime diagnostics ---
+        regime_ok_pct = (
+            float(signals['regime_ok'].sum() / n * 100) if n > 0 else 0.0
+        )
+        rhv_pct = (
+            float(signals['range_high_vol'].sum() / n * 100)
+            if n > 0 else 0.0
+        )
+        abstain_pct = (
+            float((position == 0).sum() / n * 100) if n > 0 else 100.0
+        )
+        entry_count = int(signals['entry_signal'].sum())
+
+        # --- Costs ---
+        one_way = self._get_one_way_cost()
+        total_costs = float(num_trades * 2 * one_way)
+        costs_per_trade = float(2 * one_way) if num_trades > 0 else 0.0
+
+        # --- Avg trades per month ---
+        months = n / 21.0
+        avg_trades_per_month = (
+            float(num_trades / months) if months > 0 else 0.0
+        )
+
+        metrics = {
+            # Backward compat keys (validate_run.py)
+            'EV_per_trade': avg_trade_return,
+            'max_drawdown': max_dd,
+            'win_rate': win_rate,
+            'avg_trades_per_month': avg_trades_per_month,
+            'total_signals': entry_count,
+
+            # Phase 3 performance
+            'total_return': total_return,
+            'cagr': cagr,
+            'volatility': vol,
+            'sharpe': sharpe,
+            'exposure_time_pct': exposure_pct,
+
+            # Phase 3 trade stats
+            'num_trades': num_trades,
+            'avg_trade_return': avg_trade_return,
+            'median_trade_return': median_trade_return,
+            'profit_factor': profit_factor,
+            'avg_holding_days': avg_holding,
+
+            # Regime diagnostics
+            'days_regime_ok_pct': regime_ok_pct,
+            'days_range_high_vol_pct': rhv_pct,
+            'days_abstain_pct': abstain_pct,
+            'breakout_entry_count': entry_count,
+
+            # Costs
+            'total_costs': total_costs,
+            'costs_per_trade_avg': costs_per_trade,
+        }
+
+        # Add legacy_ml only if provided (signals_only with stubs, or legacy_ml mode)
+        legacy_ml = ml_metrics.get('legacy_ml')
+        if legacy_ml is not None:
+            metrics['legacy_ml'] = legacy_ml
+
+        return metrics
+
+    # ------------------------------------------------------------------
+    # Phase 4 risk metrics
+    # ------------------------------------------------------------------
+
+    def _calculate_risk_metrics(
+        self,
+        trades_df: pd.DataFrame,
+        pnl_df: pd.DataFrame,
+        sizing_stats: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Calculate Phase 4 risk metrics from sized backtest results."""
+        risk_per_trade = self.config.strategy.risk_per_trade
+        num_trades = len(trades_df)
+        total_signals = sizing_stats['total_entry_signals']
+        total_skipped = (
+            sizing_stats['skipped_stop_bounds']
+            + sizing_stats['skipped_invalid_stop']
+            + sizing_stats['skipped_zero_shares']
+        )
+
+        # Exposure metrics (from daily exposure_pct array in pnl_df)
+        exp_col = pnl_df.get('exposure_pct')
+        if exp_col is not None and len(exp_col) > 0:
+            avg_exposure_pct = float(exp_col.mean())
+            max_exposure_pct = float(exp_col.max())
+        else:
+            avg_exposure_pct = 0.0
+            max_exposure_pct = 0.0
+
+        # R-multiple stats
+        if num_trades > 0 and 'r_multiple' in trades_df.columns:
+            r_vals = trades_df['r_multiple']
+            avg_r = float(r_vals.mean())
+            median_r = float(r_vals.median())
+            worst_r = float(r_vals.min())
+            best_r = float(r_vals.max())
+        else:
+            avg_r = 0.0
+            median_r = 0.0
+            worst_r = 0.0
+            best_r = 0.0
+
+        # Skipped / capped percentages
+        pct_skipped = (
+            float(sizing_stats['skipped_stop_bounds'] / total_signals)
+            if total_signals > 0 else 0.0
+        )
+        pct_capped = (
+            float(sizing_stats['capped_count'] / num_trades)
+            if num_trades > 0 else 0.0
+        )
+
+        # Realized risk per trade avg
+        if (
+            num_trades > 0
+            and risk_per_trade > 0
+            and 'shares' in trades_df.columns
+            and 'stop_distance' in trades_df.columns
+            and 'risk_budget' in trades_df.columns
+        ):
+            entry_equities = trades_df['risk_budget'] / risk_per_trade
+            actual_risk_fracs = (
+                trades_df['shares'] * trades_df['stop_distance']
+            ) / entry_equities
+            realized_risk_avg = float(actual_risk_fracs.mean())
+        else:
+            realized_risk_avg = 0.0
+
+        return {
+            'avg_exposure_pct': avg_exposure_pct,
+            'max_exposure_pct': max_exposure_pct,
+            'avg_r_multiple': avg_r,
+            'median_r_multiple': median_r,
+            'worst_r_multiple': worst_r,
+            'best_r_multiple': best_r,
+            'pct_trades_skipped_due_to_stop_bounds': pct_skipped,
+            'pct_trades_capped_by_max_position': pct_capped,
+            'realized_risk_per_trade_avg': realized_risk_avg,
+        }
+
+    # ------------------------------------------------------------------
+    # Shared helpers
+    # ------------------------------------------------------------------
 
     def _generate_costs_assumptions(self) -> Dict[str, Any]:
         """Document trading cost assumptions."""
@@ -311,13 +1037,16 @@ class BacktestAgent(BaseAgent):
         }
 
     def _run_sanity_tests(self, features, prices, regimes) -> Dict[str, Any]:
-        """Run leakage detection sanity tests.
+        """Run leakage detection sanity tests (legacy_ml only).
 
         Test 1 (shuffled labels): Average over N shuffles to reduce noise.
                 Train on shuffled labels -> predict test -> AUC should be ~0.50.
         Test 2 (future shift): Shift labels by a large window (60 days) to break
                 any temporal autocorrelation in features/labels.
         """
+        from sklearn.metrics import roc_auc_score  # lazy: only in legacy_ml
+        from sklearn.linear_model import LogisticRegression  # lazy
+
         forward_window = self.config.event.forward_window
         threshold = self.config.event.threshold_pct / 100.0
 
@@ -401,25 +1130,60 @@ class BacktestAgent(BaseAgent):
         }
 
     def _generate_backtest_html(self, metrics: Dict, sanity: Dict) -> str:
-        """Generate backtest HTML report."""
-        overall = metrics.get('overall', {})
+        """Generate backtest HTML report with Phase 3 metrics."""
+        overall = metrics.get('legacy_ml', {})
+        pf = metrics.get('profit_factor')
+        pf_str = f"{pf:.2f}" if pf is not None else "N/A (all winners)"
+
         return f"""<!DOCTYPE html>
 <html><head><title>Backtest Report</title></head>
 <body>
 <h1>Walk-Forward Backtest Report</h1>
-<h2>Overall Metrics</h2>
+<h2>Strategy Performance (Phase 3)</h2>
+<ul>
+  <li>Total Return: {metrics.get('total_return', 0):.2%}</li>
+  <li>CAGR: {metrics.get('cagr', 0):.2%}</li>
+  <li>Max Drawdown: {metrics.get('max_drawdown', 0):.2%}</li>
+  <li>Sharpe Ratio: {metrics.get('sharpe', 0):.2f}</li>
+  <li>Volatility: {metrics.get('volatility', 0):.2%}</li>
+  <li>Exposure: {metrics.get('exposure_time_pct', 0):.1f}%</li>
+</ul>
+<h2>Trade Statistics</h2>
+<ul>
+  <li>Number of Trades: {metrics.get('num_trades', 0)}</li>
+  <li>Win Rate: {metrics.get('win_rate', 0):.1%}</li>
+  <li>Avg Trade Return: {metrics.get('avg_trade_return', 0):.2%}</li>
+  <li>Median Trade Return: {metrics.get('median_trade_return', 0):.2%}</li>
+  <li>Profit Factor: {pf_str}</li>
+  <li>Avg Holding Days: {metrics.get('avg_holding_days', 0):.1f}</li>
+</ul>
+<h2>Regime Diagnostics</h2>
+<ul>
+  <li>Regime OK Days: {metrics.get('days_regime_ok_pct', 0):.1f}%</li>
+  <li>RANGE_HIGH_VOL Days: {metrics.get('days_range_high_vol_pct', 0):.1f}%</li>
+  <li>Abstain Days: {metrics.get('days_abstain_pct', 0):.1f}%</li>
+  <li>Breakout Entry Count: {metrics.get('breakout_entry_count', 0)}</li>
+</ul>
+<h2>Costs</h2>
+<ul>
+  <li>Total Costs: {metrics.get('total_costs', 0):.4%}</li>
+  <li>Cost per Trade (round-trip): {metrics.get('costs_per_trade_avg', 0):.4%}</li>
+</ul>
+<h2>Risk Management (Phase 4)</h2>
+<ul>
+  <li>Avg Exposure: {metrics.get('avg_exposure_pct', 0):.2%}</li>
+  <li>Max Exposure: {metrics.get('max_exposure_pct', 0):.2%}</li>
+  <li>Avg R-Multiple: {metrics.get('avg_r_multiple', 0):.2f}</li>
+  <li>Median R-Multiple: {metrics.get('median_r_multiple', 0):.2f}</li>
+  <li>Worst R-Multiple: {metrics.get('worst_r_multiple', 0):.2f}</li>
+  <li>Best R-Multiple: {metrics.get('best_r_multiple', 0):.2f}</li>
+</ul>
+<h2>ML Validation (backward compat)</h2>
 <ul>
   <li>AUC: {overall.get('auc', 'N/A')}</li>
   <li>Brier Score: {overall.get('brier_score', 'N/A')}</li>
   <li>Base Rate: {overall.get('base_rate', 'N/A')}</li>
   <li>Total OOS Samples: {overall.get('total_samples', 'N/A')}</li>
-</ul>
-<h2>Trading Metrics</h2>
-<ul>
-  <li>EV per Trade: {metrics.get('EV_per_trade', 'N/A')}</li>
-  <li>Max Drawdown: {metrics.get('max_drawdown', 'N/A')}</li>
-  <li>Win Rate: {metrics.get('win_rate', 'N/A')}</li>
-  <li>Avg Trades/Month: {metrics.get('avg_trades_per_month', 'N/A')}</li>
 </ul>
 <h2>Sanity Tests</h2>
 <ul>
