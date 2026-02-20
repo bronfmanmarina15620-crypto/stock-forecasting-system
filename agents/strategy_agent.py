@@ -18,6 +18,49 @@ from typing import Dict, Any
 from .base_agent import BaseAgent
 from strategy.ma150_atr import compute_ma150_atr_strategy
 
+# Phase 2 schema lock — any change here requires a migration plan.
+REQUIRED_SIGNAL_COLS = [
+    "regime_ok",
+    "range_high_vol",
+    "ma150_trend_ok",
+    "entry_signal",
+    "exit_signal",
+    "stop_price",
+    "position",
+]
+
+_EXPECTED_DTYPES = {
+    "regime_ok": "bool",
+    "range_high_vol": "bool",
+    "ma150_trend_ok": "bool",
+    "entry_signal": "bool",
+    "exit_signal": "bool",
+    "stop_price": "float64",
+    "position": "int64",
+}
+
+
+def _validate_signal_schema(df: pd.DataFrame) -> None:
+    """Validate strategy_signals DataFrame against the locked schema.
+
+    Raises ValueError on any mismatch so broken schemas fail loudly
+    instead of silently corrupting downstream artifacts.
+    """
+    actual_cols = list(df.columns)
+    if actual_cols != REQUIRED_SIGNAL_COLS:
+        raise ValueError(
+            f"strategy_signals schema mismatch.\n"
+            f"  Expected: {REQUIRED_SIGNAL_COLS}\n"
+            f"  Got:      {actual_cols}"
+        )
+    for col, expected_dtype in _EXPECTED_DTYPES.items():
+        actual = str(df[col].dtype)
+        if actual != expected_dtype:
+            raise ValueError(
+                f"strategy_signals dtype mismatch for '{col}': "
+                f"expected {expected_dtype}, got {actual}"
+            )
+
 
 class StrategyAgent(BaseAgent):
     """Compute MA150+ATR trend-following strategy signals."""
@@ -60,11 +103,8 @@ class StrategyAgent(BaseAgent):
             result = compute_ma150_atr_strategy(close, ma150, atr, **params)
 
             # ---- Build artifacts ----
-            signal_cols = [
-                "regime_ok", "range_high_vol", "ma150_trend_ok",
-                "entry_signal", "exit_signal", "stop_price", "position",
-            ]
-            signals_df = result[signal_cols].copy()
+            signals_df = result[REQUIRED_SIGNAL_COLS].copy()
+            _validate_signal_schema(signals_df)
 
             # Strategy explain: daily reasons keyed by date string
             explain = {}
