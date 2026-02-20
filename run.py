@@ -245,6 +245,9 @@ Examples:
     if args.min_bars is not None:
         config.data.min_trading_days = args.min_bars
 
+    print(f"lookback_days: {config.data.lookback_days}")
+    print(f"min_bars: {config.data.min_trading_days}")
+
     # Set random seeds
     set_random_seeds(config.random_seed)
     

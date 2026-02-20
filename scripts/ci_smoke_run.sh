@@ -27,7 +27,8 @@ echo ""
 python run.py --ticker "$TICKER" --lookback-days 500 --min-bars 200 2>&1 | tee /tmp/run.log
 
 # Parse RUN_ID from stdout (run.py prints "RUN_ID=<id>")
-RUN_ID="$(grep -oP 'RUN_ID=\K[0-9]{8}_[0-9]{6}_[a-z0-9]+' /tmp/run.log | tail -n1)" || true
+# Uses portable grep + cut instead of PCRE (-P) for macOS compat.
+RUN_ID="$(grep 'RUN_ID=' /tmp/run.log | tail -n1 | cut -d= -f2 | tr -d '[:space:]')" || true
 
 if [[ -z "${RUN_ID:-}" ]]; then
   echo ""
