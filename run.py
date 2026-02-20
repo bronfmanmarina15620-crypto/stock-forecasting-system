@@ -197,7 +197,21 @@ Examples:
         default='runs',
         help='Base directory for runs (default: runs)'
     )
-    
+
+    parser.add_argument(
+        '--lookback-days',
+        type=int,
+        default=None,
+        help='Override data lookback window in calendar days (default: 730)'
+    )
+
+    parser.add_argument(
+        '--min-bars',
+        type=int,
+        default=None,
+        help='Override minimum required trading days (default: 252)'
+    )
+
     args = parser.parse_args()
     
     # Check multi-ticker mode
@@ -225,6 +239,15 @@ Examples:
         print(f"Using default configuration")
         config = get_default_config(ticker)
     
+    # Apply CLI overrides for data window
+    if args.lookback_days is not None:
+        config.data.lookback_days = args.lookback_days
+    if args.min_bars is not None:
+        config.data.min_trading_days = args.min_bars
+
+    print(f"lookback_days: {config.data.lookback_days}")
+    print(f"min_bars: {config.data.min_trading_days}")
+
     # Set random seeds
     set_random_seeds(config.random_seed)
     
