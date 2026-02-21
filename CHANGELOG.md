@@ -8,6 +8,17 @@
 - Repo: add PR/issue templates, Dependabot, release workflow scaffold
 - Repo: harden `.gitignore` (`.env`, `secrets.*`)
 
+## v0.7.0-phase8-drift (2026-02-21)
+
+- New agent: `DriftAgent` computes z-score drift metrics from shadow run history (`drift_summary.json`, `drift_timeseries.parquet`)
+- New module: `analytics/drift_metrics.py` — pure, stateless drift functions (z-score, decision distribution, history discovery)
+- Coverage telemetry: `total_runs_scanned`, `eligible_runs_found`, `runs_used_in_window`, `runs_excluded`, `excluded_reasons` with bounded debug samples
+- `drift_reason_summary`: human-readable one-liner in drift_summary.json (OK / WARN with z-scores / INSUFFICIENT_HISTORY / ERROR)
+- Dashboard: drift monitoring card in HTML + JSON (`drift` key in `final_report.json`)
+- Validation: `validate_run.py` Step 9 — optional drift checks (schema, coverage identities, sample bounds, reason summary)
+- Telegram: shadow success message includes `DRIFT=<status>/<flag> COVERAGE=<used>/<eligible> SCANNED=<scanned> REASON=<summary>`
+- Fail-safe: DriftAgent never crashes the pipeline; emits degraded output on error
+
 ## v0.4.2-phase5-volatility-regime (2026-02-21)
 
 - New agent: `VolatilityRegimeAgent` classifies daily volatility as QUIET/NORMAL/EXPANDING/EXTREME via ATR(14)/ATR(100) ratio + slope

@@ -134,6 +134,13 @@ SHADOW_ARTIFACTS = {
     ],
 }
 
+# DriftAgent artifacts — validated only when the folder exists.
+DRIFT_ARTIFACTS = {
+    "DriftAgent": [
+        "drift_summary.json",
+    ],
+}
+
 
 def validate_artifacts(run_path: Path) -> Tuple[List[str], List[str]]:
     """Validate that all required artifacts exist."""
@@ -150,6 +157,9 @@ def validate_artifacts(run_path: Path) -> Tuple[List[str], List[str]]:
     shadow_dir = run_path / "ShadowMonitorAgent"
     if shadow_dir.exists():
         effective.update(SHADOW_ARTIFACTS)
+    drift_dir = run_path / "DriftAgent"
+    if drift_dir.exists():
+        effective.update(DRIFT_ARTIFACTS)
 
     for folder, files in effective.items():
         base = run_path if folder == "_ROOT_" else run_path / folder
@@ -521,6 +531,142 @@ def validate_content_hashes(run_path: Path) -> Tuple[List[str], List[str]]:
     return fail_reasons, warnings
 
 
+def validate_drift_summary(run_path: Path) -> Tuple[List[str], List[str]]:
+    """Validate DriftAgent/drift_summary.json if present (optional)."""
+    fail_reasons = []
+    warnings = []
+
+    print("\n" + "=" * 60)
+    print("STEP 9: Validating Drift Summary (optional)")
+    print("=" * 60)
+
+    drift_dir = run_path / "DriftAgent"
+    if not drift_dir.exists():
+        print("[--] DriftAgent folder not present (skipped)")
+        return fail_reasons, warnings
+
+    summary_path = drift_dir / "drift_summary.json"
+    if not summary_path.exists():
+        fail_reasons.append("DriftAgent folder exists but drift_summary.json is missing")
+        print("[X] drift_summary.json missing")
+        return fail_reasons, warnings
+
+    try:
+        summary = load_json(summary_path)
+
+        # Required schema fields
+        for key in ["schema_version", "drift_status"]:
+            if key in summary:
+                print(f"  [OK] {key}: {summary[key]}")
+            else:
+                fail_reasons.append(f"drift_summary.json missing key: {key}")
+                print(f"  [X] {key}: MISSING")
+
+        # drift_status must be a known value
+        valid_statuses = {"OK", "INSUFFICIENT_HISTORY", "ERROR"}
+        ds = summary.get("drift_status")
+        if ds and ds not in valid_statuses:
+            fail_reasons.append(
+                f"drift_summary.json invalid drift_status: {ds}"
+            )
+            print(f"  [X] drift_status invalid: {ds}")
+
+        # overall_drift_flag must be OK or WARN
+        flag = summary.get("overall_drift_flag")
+        if flag and flag not in {"OK", "WARN"}:
+            fail_reasons.append(
+                f"drift_summary.json invalid overall_drift_flag: {flag}"
+            )
+            print(f"  [X] overall_drift_flag invalid: {flag}")
+        elif flag:
+            print(f"  [OK] overall_drift_flag: {flag}")
+
+        # Coverage sanity checks (optional — only validated when keys present)
+        scanned = summary.get("total_runs_scanned")
+        eligible = summary.get("eligible_runs_found")
+        used = summary.get("runs_used_in_window")
+        if eligible is not None and used is not None:
+            print(f"  [OK] coverage present: used={used} eligible={eligible}")
+            # Identity: total_runs_scanned >= eligible >= used
+            if scanned is not None:
+                if scanned < eligible:
+                    fail_reasons.append(
+                        f"drift_summary.json: total_runs_scanned ({scanned}) "
+                        f"< eligible_runs_found ({eligible})"
+                    )
+                    print(f"  [X] scanned < eligible: {scanned} < {eligible}")
+                else:
+                    print(f"  [OK] total_runs_scanned={scanned} >= eligible={eligible}")
+            if eligible < used:
+                fail_reasons.append(
+                    f"drift_summary.json: eligible_runs_found ({eligible}) "
+                    f"< runs_used_in_window ({used})"
+                )
+                print(f"  [X] eligible < used: {eligible} < {used}")
+            reasons = summary.get("excluded_reasons")
+            if reasons is not None:
+                expected_keys = {
+                    "not_success", "missing_decision",
+                    "missing_required_artifacts", "validate_failed", "other",
+                }
+                missing_keys = expected_keys - set(reasons.keys())
+                if missing_keys:
+                    warnings.append(
+                        f"drift_summary.json excluded_reasons missing keys: "
+                        f"{sorted(missing_keys)}"
+                    )
+                    print(f"  [!] excluded_reasons missing keys: {sorted(missing_keys)}")
+                else:
+                    print(f"  [OK] excluded_reasons keys complete")
+            # Debug sample bounds (optional)
+            sample = summary.get("excluded_run_ids_sample")
+            if sample is not None:
+                if len(sample) > 10:
+                    fail_reasons.append(
+                        f"drift_summary.json: excluded_run_ids_sample "
+                        f"has {len(sample)} entries (max 10)"
+                    )
+                    print(f"  [X] excluded_run_ids_sample too long: {len(sample)}")
+                else:
+                    print(f"  [OK] excluded_run_ids_sample: {len(sample)} entries")
+            by_reason = summary.get("excluded_run_ids_by_reason_sample")
+            if by_reason is not None:
+                for reason, ids in by_reason.items():
+                    if len(ids) > 5:
+                        fail_reasons.append(
+                            f"drift_summary.json: excluded_run_ids_by_reason_sample"
+                            f"[{reason}] has {len(ids)} entries (max 5)"
+                        )
+                        print(f"  [X] per-reason sample [{reason}] too long: {len(ids)}")
+                if all(len(ids) <= 5 for ids in by_reason.values()):
+                    print(f"  [OK] excluded_run_ids_by_reason_sample: all <= 5")
+        else:
+            print(f"  [--] coverage keys not present (older schema, OK)")
+
+        # drift_reason_summary sanity (optional)
+        reason_summary = summary.get("drift_reason_summary")
+        if reason_summary is not None:
+            if not isinstance(reason_summary, str):
+                fail_reasons.append(
+                    f"drift_summary.json: drift_reason_summary is not a string"
+                )
+                print(f"  [X] drift_reason_summary: not a string")
+            elif len(reason_summary) > 130:
+                fail_reasons.append(
+                    f"drift_summary.json: drift_reason_summary too long "
+                    f"({len(reason_summary)} > 130)"
+                )
+                print(f"  [X] drift_reason_summary too long: {len(reason_summary)}")
+            else:
+                print(f"  [OK] drift_reason_summary: {reason_summary}")
+
+    except Exception as e:
+        fail_reasons.append(f"Failed parsing drift_summary.json: {e}")
+        print(f"[X] Error parsing drift_summary.json: {e}")
+
+    return fail_reasons, warnings
+
+
 def print_summary(fail_reasons: List[str], warnings: List[str]):
     """Print final validation summary."""
     print("\n" + "=" * 60)
@@ -573,6 +719,7 @@ def validate_run(run_path_str: str) -> bool:
         validate_final_report_schema,
         validate_status_json,
         validate_content_hashes,
+        validate_drift_summary,
     ]
 
     for validator in validators:

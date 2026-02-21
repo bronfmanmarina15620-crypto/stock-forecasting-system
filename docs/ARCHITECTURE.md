@@ -14,7 +14,7 @@ Default action is always ABSTAIN.
 ## Pipeline Stages
 
 ```
-Data -> Features -> Regime -> EventModel -> Backtest -> Decision/Risk -> Portfolio -> [ShadowMonitor] -> Dashboard -> Memory
+Data -> Features -> Regime -> EventModel -> Backtest -> Decision/Risk -> Drift -> Portfolio -> [ShadowMonitor] -> Dashboard -> Memory
 ```
 
 | # | Stage           | Agent                | Purpose                                    |
@@ -27,6 +27,7 @@ Data -> Features -> Regime -> EventModel -> Backtest -> Decision/Risk -> Portfol
 | 6 | Decision/Risk   | `DecisionRiskAgent`  | ENTER/ABSTAIN logic + P&L + abstain stats   |
 | 7 | Portfolio       | `PortfolioAgent`     | Position sizing (PASSIVE mode, no execution)|
 | 7b| Shadow Monitor  | `ShadowMonitorAgent` | Drift metrics + monitoring (shadow mode only, Phase 7) |
+| 7c| Drift Analysis  | `DriftAgent`         | Cross-run drift z-scores from shadow history (Phase 8) |
 | 8 | Dashboard       | `DashboardAgent`     | Generate final_report.html + final_report.json |
 | 9 | Memory          | `MemoryLearningAgent`| Store run metrics, generate suggestions     |
 
@@ -55,6 +56,8 @@ In shadow mode (`--mode shadow`), `ShadowMonitorAgent` is inserted before `Dashb
 | `agents/decision_risk_agent.py`  | Signal generation, PnL, abstain stats        |
 | `agents/portfolio_agent.py`      | PASSIVE portfolio plan                       |
 | `agents/shadow_monitor_agent.py` | Shadow mode drift metrics (Phase 7)          |
+| `agents/drift_agent.py`         | Cross-run drift analysis (Phase 8)           |
+| `analytics/drift_metrics.py`    | Pure drift metric functions (z-score, history)|
 | `agents/dashboard_agent.py`      | HTML + JSON report generation                |
 | `agents/memory_learning_agent.py`| SQLite persistence, suggestions              |
 | `datasources/yahoo_finance.py`   | yfinance adapter with caching                |
@@ -131,6 +134,11 @@ runs/PLTR/<RUN_ID>/
     portfolio_plan.json        # Allocation plan
     portfolio_report.html      # Portfolio visual report
     risk_summary.json          # Risk metrics
+  DriftAgent/
+    output.json                # Agent output metadata
+    drift_summary.json         # Z-scores, drift flag, coverage counts, debug samples, drift_reason_summary
+    drift_timeseries.parquet   # Per-run history with z-scores
+    status.txt                 # One-line status summary
   DashboardAgent/
     output.json                # Agent output metadata
   MemoryLearningAgent/

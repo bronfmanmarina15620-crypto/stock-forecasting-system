@@ -19,6 +19,7 @@ from .robustness_agent import RobustnessAgent
 from .portfolio_agent import PortfolioAgent
 from .dashboard_agent import DashboardAgent
 from .memory_learning_agent import MemoryLearningAgent
+from .drift_agent import DriftAgent
 from .shadow_monitor_agent import ShadowMonitorAgent
 
 
@@ -42,6 +43,7 @@ class OrchestratorAgent(BaseAgent):
             BacktestAgent,
             RobustnessAgent,
             DecisionRiskAgent,
+            DriftAgent,
             PortfolioAgent,
             DashboardAgent,
             MemoryLearningAgent,
