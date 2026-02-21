@@ -46,7 +46,9 @@ python validate_run.py --run runs/PLTR/20240214_120000_abc123
 
 - `v0.4.0-phase4-risk` — Phase 4 risk sizing integration (risk_explain.json + Phase 4 metrics + dashboard + validate_run)
 - `v0.4.1-phase4-hardening` — post-release hardening (README docs + schema guard tests + changelog)
-- `v0.5.0-phase5-volatility-regime` — Phase 5 volatility regime filter (ATR ratio + slope classification, EXTREME blocking)
+- `v0.4.2-phase5-volatility-regime` — Phase 5 volatility regime filter
+  - Adds VolatilityRegimeAgent (ATR ratio + slope) with regimes QUIET/NORMAL/EXPANDING/EXTREME
+  - EXTREME blocks ENTER and applies regime multiplier to position sizing; adds regime breakdown in backtest + dashboard
 
 ## 📁 Project Structure
 
@@ -437,6 +439,6 @@ This system is for educational and research purposes. Past performance does not 
 
 ---
 
-**Version**: 0.5.0 (`v0.5.0-phase5-volatility-regime`)
+**Version**: 0.4.2 (`v0.4.2-phase5-volatility-regime`)
 **Last Updated**: 2026-02-21
 **Status**: Production-Ready MVP (Single-Ticker Mode, Phase 5 Volatility Regime Filter)
