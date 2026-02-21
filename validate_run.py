@@ -439,6 +439,12 @@ _CONTENT_HASH_TARGETS = [
     "final_report.json",
     "DecisionRiskAgent/decision_action.json",
     "RobustnessAgent/summary.json",
+    "RobustnessAgent/monte_carlo.json",
+    "RobustnessAgent/walk_forward.json",
+    "RobustnessAgent/sensitivity_map.json",
+    "RobustnessAgent/exposure_decomposition.json",
+    "RobustnessAgent/regime_contribution.json",
+    "RobustnessAgent/capacity_test.json",
 ]
 
 

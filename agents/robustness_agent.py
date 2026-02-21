@@ -104,8 +104,10 @@ class RobustnessAgent(BaseAgent):
                 exposure, regime_contrib, capacity, bt_metrics,
             )
 
-            # ---- Embed content hash for determinism verification ----
-            summary["content_hash_sha256"] = content_hash_sha256(summary)
+            # ---- Embed content hashes for determinism verification ----
+            for artifact in (walk_forward, sensitivity, monte_carlo,
+                             exposure, regime_contrib, capacity, summary):
+                artifact["content_hash_sha256"] = content_hash_sha256(artifact)
 
             # ---- Save all artifacts ----
             self.save_artifact("walk_forward.json", walk_forward)
