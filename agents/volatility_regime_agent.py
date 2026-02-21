@@ -41,12 +41,15 @@ def classify_volatility_regime(
         3. QUIET    if ratio < quiet_threshold
         4. NORMAL   otherwise
     """
-    if np.isnan(atr_ratio) or np.isnan(atr_slope):
+    if np.isnan(atr_ratio):
         return NORMAL  # safe default during warmup
 
     if atr_ratio > extreme_threshold:
         return EXTREME
-    if atr_ratio > expansion_threshold and atr_slope > 0:
+
+    # NaN slope treated as slope <= 0 (blocks EXPANDING only)
+    slope_positive = (not np.isnan(atr_slope)) and atr_slope > 0
+    if atr_ratio > expansion_threshold and slope_positive:
         return EXPANDING
     if atr_ratio < quiet_threshold:
         return QUIET

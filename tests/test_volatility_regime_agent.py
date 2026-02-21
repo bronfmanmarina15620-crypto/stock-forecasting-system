@@ -101,8 +101,24 @@ class TestRegimePrecedence:
         result = classify_volatility_regime(np.nan, 0.0, QUIET_TH, EXPANSION_TH, EXTREME_TH)
         assert result == NORMAL
 
-    def test_nan_slope_returns_normal(self):
+    def test_nan_slope_normal_ratio_returns_normal(self):
+        """ratio in NORMAL range + NaN slope -> NORMAL."""
         result = classify_volatility_regime(1.0, np.nan, QUIET_TH, EXPANSION_TH, EXTREME_TH)
+        assert result == NORMAL
+
+    def test_nan_slope_extreme_ratio_returns_extreme(self):
+        """ratio > extreme_threshold + NaN slope -> EXTREME (slope irrelevant)."""
+        result = classify_volatility_regime(1.6, np.nan, QUIET_TH, EXPANSION_TH, EXTREME_TH)
+        assert result == EXTREME
+
+    def test_nan_slope_quiet_ratio_returns_quiet(self):
+        """ratio < quiet_threshold + NaN slope -> QUIET (slope irrelevant)."""
+        result = classify_volatility_regime(0.5, np.nan, QUIET_TH, EXPANSION_TH, EXTREME_TH)
+        assert result == QUIET
+
+    def test_nan_slope_expanding_ratio_returns_normal(self):
+        """ratio > expansion but NaN slope -> NORMAL (NaN slope blocks EXPANDING)."""
+        result = classify_volatility_regime(1.3, np.nan, QUIET_TH, EXPANSION_TH, EXTREME_TH)
         assert result == NORMAL
 
 

@@ -1054,7 +1054,7 @@ class BacktestAgent(BaseAgent):
         # Tag each trade with regime at entry
         trades_df = trades_df.copy()
         trades_df['vol_regime'] = trades_df['entry_date'].map(date_regime_map)
-        trades_df['vol_regime'] = trades_df['vol_regime'].fillna('UNKNOWN')
+        trades_df['vol_regime'] = trades_df['vol_regime'].fillna('NORMAL')
 
         breakdown = []
         for regime, group in sorted(trades_df.groupby('vol_regime')):
