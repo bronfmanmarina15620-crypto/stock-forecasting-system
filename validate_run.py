@@ -45,6 +45,10 @@ REQUIRED_ARTIFACTS = {
         "decision_action.json",
         "decision_explain.json",
     ],
+    "RobustnessAgent": [
+        "summary.json",
+        "monte_carlo.json",
+    ],
     # final_report.html/json are saved to run root by DashboardAgent
     "_ROOT_": [
         "status.txt",

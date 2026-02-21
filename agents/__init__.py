@@ -1,5 +1,5 @@
 """
-Agents package - all 12 agents.
+Agents package - all 13 agents.
 """
 
 from .base_agent import BaseAgent
@@ -12,6 +12,7 @@ from .event_model_agent import EventModelAgent
 from .backtest_agent import BacktestAgent
 from .strategy_agent import StrategyAgent
 from .decision_risk_agent import DecisionRiskAgent
+from .robustness_agent import RobustnessAgent
 from .portfolio_agent import PortfolioAgent
 from .dashboard_agent import DashboardAgent
 from .memory_learning_agent import MemoryLearningAgent
@@ -27,6 +28,7 @@ __all__ = [
     'BacktestAgent',
     'StrategyAgent',
     'DecisionRiskAgent',
+    'RobustnessAgent',
     'PortfolioAgent',
     'DashboardAgent',
     'MemoryLearningAgent',
