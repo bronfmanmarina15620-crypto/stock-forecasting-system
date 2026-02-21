@@ -2,7 +2,8 @@ name: Nightly PLTR Run
 
 on:
   schedule:
-    - cron: '0 21 * * *'
+    - cron: '0 20 * * *'   # 23:00 Israel Summer (IDT, UTC+3)
+    - cron: '0 21 * * *'   # 23:00 Israel Winter (IST, UTC+2)
   workflow_dispatch:
 
 jobs:
@@ -16,27 +17,42 @@ jobs:
       TZ: "UTC"
 
     steps:
+      - name: DST guard – only run at 23:00 Israel time
+        if: github.event_name == 'schedule'
+        run: |
+          ISRAEL_HOUR=$(TZ=Asia/Jerusalem date +%-H)
+          if [ "$ISRAEL_HOUR" -ne 23 ]; then
+            echo "::notice::Israel hour is $ISRAEL_HOUR, not 23 – skipping DST-mismatched trigger"
+            echo "SKIP_RUN=true" >> "$GITHUB_ENV"
+          fi
+
       - name: Checkout
+        if: env.SKIP_RUN != 'true'
         uses: actions/checkout@v4
 
       - name: Record start time
+        if: env.SKIP_RUN != 'true'
         run: echo "START_TIME=$(date '+%d/%m/%Y %H:%M UTC')" >> $GITHUB_ENV
 
       - name: Set up Python
+        if: env.SKIP_RUN != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: "pip"
 
       - name: Install dependencies
+        if: env.SKIP_RUN != 'true'
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
       - name: Run system (PLTR)
+        if: env.SKIP_RUN != 'true'
         run: python run.py --ticker PLTR
 
       - name: Find latest run folder and read summary
+        if: env.SKIP_RUN != 'true'
         id: latest
         run: |
           LATEST_DIR=$(ls -dt runs/PLTR/* | head -n 1)
@@ -56,10 +72,12 @@ jobs:
           echo "Latest run dir: $LATEST_DIR"
 
       - name: Validate run
+        if: env.SKIP_RUN != 'true'
         run: |
           python validate_run.py --run ${{ steps.latest.outputs.latest_dir }}
 
       - name: Upload reports (artifact)
+        if: env.SKIP_RUN != 'true'
         uses: actions/upload-artifact@v4
         with:
           name: pltr_reports_${{ github.run_id }}
@@ -78,12 +96,12 @@ jobs:
           if-no-files-found: error
 
       - name: Log success
-        if: ${{ success() }}
+        if: success() && env.SKIP_RUN != 'true'
         run: |
           echo "SUCCESS: PLTR nightly run completed at $(date '+%d/%m/%Y %H:%M UTC')"
 
       - name: Notify Telegram on success
-        if: success() && github.event_name == 'schedule'
+        if: success() && github.event_name == 'schedule' && env.SKIP_RUN != 'true'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -100,7 +118,7 @@ jobs:
             --data-urlencode "text=${TEXT}" || true
 
       - name: Notify Telegram on failure
-        if: ${{ failure() }}
+        if: failure() && env.SKIP_RUN != 'true'
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
