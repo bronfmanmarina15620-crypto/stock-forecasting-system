@@ -42,6 +42,19 @@ python run.py --ticker PLTR --config my_config.json
 python validate_run.py --run runs/PLTR/20240214_120000_abc123
 ```
 
+### Shadow Mode (Paper-Run, No Trading)
+
+```bash
+# Run in monitoring-only mode — no orders, no broker calls
+python run.py --ticker PLTR --mode shadow
+
+# Validate (same command, works for both modes)
+python validate_run.py --run runs/PLTR/<RUN_ID>
+```
+
+Shadow artifacts: `runs/PLTR/<RUN_ID>/ShadowMonitorAgent/shadow_metrics.json`
+and `shadow_summary.json`. See [Phase 7](#phase-7-shadow-mode-live-paper-run-monitoring-only) for details.
+
 ### Release Tags
 
 - `v0.4.0-phase4-risk` — Phase 4 risk sizing integration (risk_explain.json + Phase 4 metrics + dashboard + validate_run)
