@@ -77,7 +77,7 @@ class ShadowMonitorAgent(BaseAgent):
             "ticker": ticker,
             "mode": "shadow",
             "asof_date": asof_date,
-            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "timestamp_utc": asof_date + "T00:00:00+00:00",
             "decision": decision,
             "confidence": confidence,
             "regime_label": regime_label,

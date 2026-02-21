@@ -86,13 +86,13 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           RUN_ID="${{ steps.run.outputs.run_id }}"
-          # Determine which step failed
+          # Determine which step failed (fixed values, uppercase)
           if [ "${{ steps.run.outcome }}" = "failure" ]; then
-            STEP_NAME="run"
+            STEP_NAME="RUN"
           elif [ "${{ steps.validate.outcome }}" = "failure" ]; then
-            STEP_NAME="validate"
+            STEP_NAME="VALIDATE"
           else
-            STEP_NAME="unknown"
+            STEP_NAME="UNKNOWN"
           fi
           # Safety: only log token length + last 3 chars of chat id
           TOKEN_LEN=${#TELEGRAM_BOT_TOKEN}
