@@ -68,6 +68,9 @@ and `shadow_summary.json`. See [Phase 7](#phase-7-shadow-mode-live-paper-run-mon
 - `v0.6.0-phase7-shadow` — Phase 7 shadow mode (monitoring-only paper-run)
   - Adds ShadowMonitorAgent with drift metrics, rolling ENTER frequency, degraded mode
   - New `--mode shadow` CLI flag; nightly GitHub Action + Telegram notifications
+- `v0.7.0-phase8-drift` — Phase 8 shadow drift monitoring
+  - Adds DriftAgent with z-score drift detection, coverage telemetry, drift_reason_summary
+  - Dashboard + Telegram integration; validate_run.py optional Step 9
 
 ## 📁 Project Structure
 
@@ -80,7 +83,7 @@ stock-forecasting-system/
 ├── utils.py                    # Utility functions
 ├── requirements.txt            # Dependencies
 │
-├── agents/                     # All 12 agents
+├── agents/                     # All pipeline agents
 │   ├── __init__.py
 │   ├── base_agent.py           # Base agent class
 │   ├── orchestrator_agent.py   # Agent 1: Coordinator
@@ -93,8 +96,13 @@ stock-forecasting-system/
 │   ├── decision_risk_agent.py  # Agent 7: Decision making
 │   ├── robustness_agent.py     # Agent 7b: Robustness validation (Phase 6)
 │   ├── portfolio_agent.py      # Agent 8: Portfolio planning
+│   ├── shadow_monitor_agent.py # Agent 8b: Shadow mode drift metrics (Phase 7)
+│   ├── drift_agent.py          # Agent 8c: Cross-run drift analysis (Phase 8)
 │   ├── dashboard_agent.py      # Agent 9: Dashboard generation
 │   └── memory_learning_agent.py # Agent 10: Memory & learning
+│
+├── analytics/                  # Pure metric functions
+│   └── drift_metrics.py        # Z-score drift, history discovery, coverage
 │
 ├── datasources/                # Data source adapters
 │   ├── __init__.py
@@ -384,6 +392,50 @@ When present, the shadow summary is also included in `final_report.json` under t
 
 A GitHub Actions workflow (`.github/workflows/nightly_pltr_shadow.yml`) runs shadow mode daily at 23:00 Israel time and sends a Telegram notification on success/failure.
 
+## Drift Monitoring (Shadow History)
+
+DriftAgent analyzes accumulated shadow runs to detect behavioral drift. After 30+ nightly runs, it computes z-score-based drift metrics comparing the latest run against historical distributions.
+
+### Artifacts
+
+| Path | Description |
+|------|-------------|
+| `DriftAgent/drift_summary.json` | Schema v1.0: status, z-scores, decision distribution, overall flag |
+| `DriftAgent/drift_timeseries.parquet` | One row per historical run + current (raw values + z-scores) |
+| `DriftAgent/status.txt` | One-line status summary |
+
+### Interpreting OK vs WARN
+
+- **OK**: All available z-scores are within 2 standard deviations of the historical mean. Normal operation.
+- **WARN**: At least one observable (confidence, ATR ratio, ATR slope) has `|z| >= 2.0` from its historical distribution. The `drift_reason_summary` field lists which metric(s) triggered and their z-scores (e.g., `"WARN: atr_percentile z=+2.5"`).
+- **INSUFFICIENT_HISTORY**: Fewer than 30 prior successful runs available. Accumulate more nightly shadow runs before drift detection becomes meaningful.
+
+### How it works
+
+1. DriftAgent discovers all prior successful runs in `runs/<TICKER>/` that contain `DecisionRiskAgent/decision_action.json`
+2. Extracts per-run observables: decision (ENTER/ABSTAIN), confidence, ATR ratio, ATR slope
+3. Computes z-scores of the latest run's values against the last 60 runs' distribution (min 30 for OK status)
+4. Emits `overall_drift_flag: WARN` if any `|z| >= 2.0`
+
+The drift summary appears in `final_report.html` and `final_report.json` under the `drift` key. Telegram notifications include `DRIFT=<status>/<flag> COVERAGE=<used>/<eligible> SCANNED=<scanned> REASON=<summary>` when DriftAgent artifacts are present.
+
+### Coverage
+
+`drift_summary.json` includes coverage telemetry so you can track how many runs contributed to drift metrics:
+
+| Field | Definition |
+|-------|-----------|
+| `total_runs_scanned` | Run directories inspected (excludes current run, hidden dirs) |
+| `eligible_runs_found` | Runs that passed all checks (SUCCESS + has decision) |
+| `runs_used_in_window` | Runs actually used for z-scores (capped at `window_k=60`) |
+| `runs_excluded` | Runs skipped — always equals `total_runs_scanned - eligible_runs_found` |
+| `excluded_reasons` | Breakdown: `not_success`, `missing_decision`, `missing_required_artifacts`, `validate_failed`, `other` |
+| `excluded_run_ids_sample` | First 10 excluded run IDs (sorted ascending) for debugging |
+| `excluded_run_ids_by_reason_sample` | Per-reason samples (max 5 each) for debugging |
+| `drift_reason_summary` | Human-readable one-liner: `"OK: no 2-sigma drift detected"`, `"WARN: atr_percentile z=+2.5"`, or `"STATUS=INSUFFICIENT_HISTORY (need >=30 runs)"` |
+
+Runs may be excluded because they failed (`not_success`), lack `DecisionRiskAgent/decision_action.json` (`missing_decision`), or have corrupt/missing status files.
+
 ## 🛡️ Safety Features
 
 ### Data Leakage Prevention
@@ -540,6 +592,6 @@ This system is for educational and research purposes. Past performance does not 
 
 ---
 
-**Version**: 0.6.0 (`v0.6.0-phase7-shadow`)
+**Version**: 0.7.0 (`v0.7.0-phase8-drift`)
 **Last Updated**: 2026-02-21
-**Status**: Production-Ready MVP (Single-Ticker Mode, Phase 7 Shadow Monitoring)
+**Status**: Production-Ready MVP (Single-Ticker Mode, Phase 8 Drift Monitoring)

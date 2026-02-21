@@ -40,6 +40,9 @@ class DashboardAgent(BaseAgent):
             # Phase 7: Load shadow summary (safe fallback)
             shadow_summary = self._load_shadow_summary()
 
+            # Phase 8: Load drift summary (safe fallback)
+            drift_summary = self._load_drift_summary()
+
             # Generate final HTML report
             html_report = self._generate_html_report(
                 data_output=data_output,
@@ -53,6 +56,7 @@ class DashboardAgent(BaseAgent):
                 vol_regime_latest=vol_regime_latest,
                 regime_breakdown=regime_breakdown,
                 robustness_summary=robustness_summary,
+                drift_summary=drift_summary,
             )
 
             # Generate JSON report
@@ -66,6 +70,7 @@ class DashboardAgent(BaseAgent):
                 regime_breakdown=regime_breakdown,
                 robustness_summary=robustness_summary,
                 shadow_summary=shadow_summary,
+                drift_summary=drift_summary,
             )
 
             # Embed deterministic content fingerprint
@@ -139,6 +144,19 @@ class DashboardAgent(BaseAgent):
         with open(path, "r") as f:
             return json.load(f)
 
+    def _load_drift_summary(self) -> Dict[str, Any]:
+        """Load Phase 8 DriftAgent/drift_summary.json, returning empty dict on absence."""
+        path = os.path.join(
+            self.run_dir, "DriftAgent", "drift_summary.json"
+        )
+        if not os.path.exists(path):
+            return {}
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
     def _generate_html_report(self, **kwargs) -> str:
         """Generate comprehensive HTML report."""
         data_output = kwargs["data_output"]
@@ -196,6 +214,10 @@ class DashboardAgent(BaseAgent):
         # Phase 6: Robustness summary
         robustness_summary = kwargs.get("robustness_summary", {})
         robustness_html = self._generate_robustness_html(robustness_summary)
+
+        # Phase 8: Drift summary
+        drift_summary = kwargs.get("drift_summary", {})
+        drift_html = self._generate_drift_html(drift_summary)
 
         html = f"""
 <!DOCTYPE html>
@@ -448,6 +470,8 @@ class DashboardAgent(BaseAgent):
 
         {robustness_html}
 
+        {drift_html}
+
         <h2>ML Validation</h2>
         <div class="card">
             <div class="metric">
@@ -632,6 +656,80 @@ class DashboardAgent(BaseAgent):
 
         return wf_html + mc_html + sens_html
 
+    def _generate_drift_html(self, summary: Dict[str, Any]) -> str:
+        """Generate Phase 8 drift monitoring HTML section."""
+        if not summary:
+            return ""
+
+        status = summary.get("drift_status", "N/A")
+        flag = summary.get("overall_drift_flag", "N/A")
+        n = summary.get("history_window_used", 0)
+
+        # Coverage fields (optional, backward compatible)
+        scanned = summary.get("total_runs_scanned")
+        eligible = summary.get("eligible_runs_found")
+        used = summary.get("runs_used_in_window")
+        excluded = summary.get("runs_excluded", 0)
+        if eligible is not None and used is not None:
+            scanned_part = f" scanned {scanned}," if scanned is not None else ""
+            coverage_str = f"used {used} of {eligible} eligible ({scanned_part} excluded {excluded})"
+        else:
+            coverage_str = f"{n} runs"
+
+        # Format z-scores (may be None)
+        def _zfmt(val):
+            if val is None:
+                return "N/A"
+            return f"{val:+.2f}"
+
+        conf_z = _zfmt(summary.get("confidence_mean_zscore"))
+        slope_z = _zfmt(summary.get("ma150_slope_drift_zscore"))
+        atr_z = _zfmt(summary.get("atr_percentile_drift_zscore"))
+
+        flag_color = "#e74c3c" if flag == "WARN" else "#27ae60"
+
+        return f"""
+        <h2>Drift Monitoring (Shadow History)</h2>
+        <div class="card" style="border-left-color: {flag_color};">
+            <div class="metric">
+                <span class="metric-label">Drift Status:</span>
+                <span class="metric-value">{status}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Overall Flag:</span>
+                <span class="metric-value" style="color: {flag_color};">{flag}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Coverage:</span>
+                <span class="metric-value">{coverage_str}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Reason:</span>
+                <span class="metric-value">{summary.get('drift_reason_summary', 'N/A')}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">ENTER Rate:</span>
+                <span class="metric-value">{summary.get('decision_rate_enter', 0):.1%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">ABSTAIN Rate:</span>
+                <span class="metric-value">{summary.get('decision_rate_abstain', 0):.1%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Confidence Z:</span>
+                <span class="metric-value">{conf_z}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">MA150 Slope Z:</span>
+                <span class="metric-value">{slope_z}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">ATR Percentile Z:</span>
+                <span class="metric-value">{atr_z}</span>
+            </div>
+        </div>
+        """
+
     def _generate_json_report(self, **kwargs) -> Dict[str, Any]:
         """Generate JSON summary report with Phase 2 + Phase 3 fields."""
         decision_output = kwargs["decision_output"]
@@ -721,5 +819,31 @@ class DashboardAgent(BaseAgent):
 
         if shadow_section is not None:
             report["shadow"] = shadow_section
+
+        # Phase 8: Drift summary (optional)
+        drift_data = kwargs.get("drift_summary", {})
+        if drift_data:
+            drift_section = {
+                "drift_status": drift_data.get("drift_status"),
+                "overall_drift_flag": drift_data.get("overall_drift_flag"),
+                "drift_reason_summary": drift_data.get("drift_reason_summary"),
+                "history_window_used": drift_data.get("history_window_used"),
+                "decision_rate_enter": drift_data.get("decision_rate_enter"),
+                "decision_rate_abstain": drift_data.get("decision_rate_abstain"),
+                "decision_rate_exit": drift_data.get("decision_rate_exit"),
+                "confidence_mean_zscore": drift_data.get("confidence_mean_zscore"),
+                "ma150_slope_drift_zscore": drift_data.get("ma150_slope_drift_zscore"),
+                "atr_percentile_drift_zscore": drift_data.get("atr_percentile_drift_zscore"),
+            }
+            # Coverage sub-object (optional, backward compatible)
+            if "eligible_runs_found" in drift_data:
+                drift_section["coverage"] = {
+                    "total_runs_scanned": drift_data.get("total_runs_scanned"),
+                    "eligible_runs_found": drift_data.get("eligible_runs_found"),
+                    "runs_used_in_window": drift_data.get("runs_used_in_window"),
+                    "runs_excluded": drift_data.get("runs_excluded"),
+                    "excluded_reasons": drift_data.get("excluded_reasons"),
+                }
+            report["drift"] = drift_section
 
         return report

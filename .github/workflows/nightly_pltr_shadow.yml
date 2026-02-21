@@ -55,9 +55,32 @@ jobs:
             DECISION="UNKNOWN"
             REGIME="na"
           fi
+          # Read drift summary if present (|| echo "na" guards corrupt JSON)
+          DRIFT="${RUN_DIR}/DriftAgent/drift_summary.json"
+          if [ -f "$DRIFT" ]; then
+            DRIFT_STATUS=$(python3 -c "import json; print(json.load(open('${DRIFT}')).get('drift_status','na'))" || echo "na")
+            DRIFT_FLAG=$(python3 -c "import json; print(json.load(open('${DRIFT}')).get('overall_drift_flag','na'))" || echo "na")
+            DRIFT_USED=$(python3 -c "import json; print(json.load(open('${DRIFT}')).get('runs_used_in_window','na'))" || echo "na")
+            DRIFT_ELIGIBLE=$(python3 -c "import json; print(json.load(open('${DRIFT}')).get('eligible_runs_found','na'))" || echo "na")
+            DRIFT_SCANNED=$(python3 -c "import json; print(json.load(open('${DRIFT}')).get('total_runs_scanned','na'))" || echo "na")
+            DRIFT_REASON=$(python3 -c "import json; print(json.load(open('${DRIFT}')).get('drift_reason_summary','na'))" || echo "na")
+          else
+            DRIFT_STATUS="na"
+            DRIFT_FLAG="na"
+            DRIFT_USED="na"
+            DRIFT_ELIGIBLE="na"
+            DRIFT_SCANNED="na"
+            DRIFT_REASON="na"
+          fi
           echo "decision=${DECISION}" >> "$GITHUB_OUTPUT"
           echo "regime=${REGIME}" >> "$GITHUB_OUTPUT"
           echo "run_dir=${RUN_DIR}" >> "$GITHUB_OUTPUT"
+          echo "drift_status=${DRIFT_STATUS}" >> "$GITHUB_OUTPUT"
+          echo "drift_flag=${DRIFT_FLAG}" >> "$GITHUB_OUTPUT"
+          echo "drift_used=${DRIFT_USED}" >> "$GITHUB_OUTPUT"
+          echo "drift_eligible=${DRIFT_ELIGIBLE}" >> "$GITHUB_OUTPUT"
+          echo "drift_scanned=${DRIFT_SCANNED}" >> "$GITHUB_OUTPUT"
+          echo "drift_reason=${DRIFT_REASON}" >> "$GITHUB_OUTPUT"
 
       - name: Validate run
         id: validate
@@ -73,8 +96,20 @@ jobs:
           RUN_ID="${{ steps.run.outputs.run_id }}"
           DECISION="${{ steps.shadow.outputs.decision }}"
           REGIME="${{ steps.shadow.outputs.regime }}"
-          TEXT=$(printf '\xe2\x9c\x85 SHADOW OK | PLTR | RUN_ID=%s | DECISION=%s | REGIME=%s' \
-            "$RUN_ID" "$DECISION" "$REGIME")
+          DRIFT_STATUS="${{ steps.shadow.outputs.drift_status }}"
+          DRIFT_FLAG="${{ steps.shadow.outputs.drift_flag }}"
+          DRIFT_USED="${{ steps.shadow.outputs.drift_used }}"
+          DRIFT_ELIGIBLE="${{ steps.shadow.outputs.drift_eligible }}"
+          DRIFT_SCANNED="${{ steps.shadow.outputs.drift_scanned }}"
+          DRIFT_REASON="${{ steps.shadow.outputs.drift_reason }}"
+          # Include drift info only if DriftAgent ran
+          if [ "$DRIFT_STATUS" != "na" ]; then
+            DRIFT_PART=" | DRIFT=${DRIFT_STATUS}/${DRIFT_FLAG} COVERAGE=${DRIFT_USED}/${DRIFT_ELIGIBLE} SCANNED=${DRIFT_SCANNED} REASON=${DRIFT_REASON}"
+          else
+            DRIFT_PART=""
+          fi
+          TEXT=$(printf '\xe2\x9c\x85 SHADOW OK | PLTR | RUN_ID=%s | DECISION=%s | REGIME=%s%s' \
+            "$RUN_ID" "$DECISION" "$REGIME" "$DRIFT_PART")
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
             --data-urlencode "text=${TEXT}" || true
