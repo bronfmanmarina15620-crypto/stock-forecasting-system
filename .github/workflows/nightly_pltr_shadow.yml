@@ -32,11 +32,15 @@ jobs:
       - name: Run shadow mode
         id: run
         run: |
-          set -o pipefail
+          # Run pipeline, capture output for RUN_ID parsing.
+          # Avoid set -o pipefail so grep/echo still execute on failure;
+          # instead capture the exit code via PIPESTATUS.
           python run.py --ticker PLTR --mode shadow 2>&1 | tee /tmp/run_output.txt
+          RUN_EXIT=${PIPESTATUS[0]}
           # Parse RUN_ID from stdout (run.py prints "RUN_ID=<id>")
-          RUN_ID=$(grep -m1 '^RUN_ID=' /tmp/run_output.txt | cut -d= -f2)
+          RUN_ID=$(grep -m1 '^RUN_ID=' /tmp/run_output.txt | cut -d= -f2 || true)
           echo "run_id=${RUN_ID:-na}" >> "$GITHUB_OUTPUT"
+          exit "$RUN_EXIT"
 
       - name: Read shadow summary
         id: shadow

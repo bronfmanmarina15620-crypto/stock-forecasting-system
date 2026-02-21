@@ -57,16 +57,16 @@ class OrchestratorAgent(BaseAgent):
         """
         self.logger.info(f"Starting orchestration for {self.config.ticker} (mode={mode})")
 
-        # In shadow mode, insert ShadowMonitorAgent before DashboardAgent
-        # so the dashboard can read the shadow summary if present.
+        # Build the agent list for this run.  In shadow mode, insert
+        # ShadowMonitorAgent before DashboardAgent.  Use a local copy so
+        # self.agent_classes is never mutated (safe for repeated calls).
+        agent_classes = list(self.agent_classes)
         if mode == "shadow":
-            agent_classes = list(self.agent_classes)
             dashboard_idx = next(
                 i for i, cls in enumerate(agent_classes)
                 if cls.__name__ == "DashboardAgent"
             )
             agent_classes.insert(dashboard_idx, ShadowMonitorAgent)
-            self.agent_classes = agent_classes
 
         results = {}
         stage_status = {}
@@ -74,7 +74,7 @@ class OrchestratorAgent(BaseAgent):
         errors = []
 
         # Execute each agent
-        for agent_class in self.agent_classes:
+        for agent_class in agent_classes:
             agent_name = agent_class.__name__
             self.logger.info(f"Executing {agent_name}...")
             stage_start = datetime.now()

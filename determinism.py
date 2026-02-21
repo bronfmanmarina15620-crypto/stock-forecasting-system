@@ -42,6 +42,7 @@ VOLATILE_KEYS: frozenset[str] = frozenset({
     "run_timestamp",        # DashboardAgent injects datetime.now().isoformat()
     "started",              # OrchestratorAgent per-stage wall-clock start time
     "timestamp",            # BaseAgent.save_output() injects pd.Timestamp.now()
+    "timestamp_utc",        # ShadowMonitorAgent wall-clock UTC timestamp
 })
 
 #: Suffix for keys whose *values* are filesystem paths containing the run ID.
