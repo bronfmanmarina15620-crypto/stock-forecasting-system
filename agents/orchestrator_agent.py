@@ -19,6 +19,7 @@ from .robustness_agent import RobustnessAgent
 from .portfolio_agent import PortfolioAgent
 from .dashboard_agent import DashboardAgent
 from .memory_learning_agent import MemoryLearningAgent
+from .shadow_monitor_agent import ShadowMonitorAgent
 
 
 class OrchestratorAgent(BaseAgent):
@@ -46,9 +47,26 @@ class OrchestratorAgent(BaseAgent):
             MemoryLearningAgent,
         ]
 
-    def run(self) -> Dict[str, Any]:
-        """Execute all agents in order."""
-        self.logger.info(f"Starting orchestration for {self.config.ticker}")
+    def run(self, mode: str = "backtest") -> Dict[str, Any]:
+        """Execute all agents in order.
+
+        Parameters
+        ----------
+        mode : str
+            ``"backtest"`` (default) or ``"shadow"`` (monitoring-only).
+        """
+        self.logger.info(f"Starting orchestration for {self.config.ticker} (mode={mode})")
+
+        # In shadow mode, insert ShadowMonitorAgent before DashboardAgent
+        # so the dashboard can read the shadow summary if present.
+        if mode == "shadow":
+            agent_classes = list(self.agent_classes)
+            dashboard_idx = next(
+                i for i, cls in enumerate(agent_classes)
+                if cls.__name__ == "DashboardAgent"
+            )
+            agent_classes.insert(dashboard_idx, ShadowMonitorAgent)
+            self.agent_classes = agent_classes
 
         results = {}
         stage_status = {}

@@ -1,0 +1,101 @@
+name: Nightly PLTR Shadow Run
+
+on:
+  schedule:
+    # 21:00 UTC = 23:00 Israel (Asia/Jerusalem, IST = UTC+2 winter).
+    # During DST (IDT = UTC+3, ~late Mar-late Oct) this fires at 00:00 local.
+    - cron: "0 21 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  shadow-pltr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TICKER: PLTR
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run shadow mode
+        id: run
+        run: |
+          set -o pipefail
+          python run.py --ticker PLTR --mode shadow 2>&1 | tee /tmp/run_output.txt
+          # Parse RUN_ID from stdout (run.py prints "RUN_ID=<id>")
+          RUN_ID=$(grep -m1 '^RUN_ID=' /tmp/run_output.txt | cut -d= -f2)
+          echo "run_id=${RUN_ID:-na}" >> "$GITHUB_OUTPUT"
+
+      - name: Read shadow summary
+        id: shadow
+        run: |
+          RUN_ID="${{ steps.run.outputs.run_id }}"
+          RUN_DIR="runs/PLTR/${RUN_ID}"
+          SUMMARY="${RUN_DIR}/ShadowMonitorAgent/shadow_summary.json"
+          if [ -f "$SUMMARY" ]; then
+            DECISION=$(python3 -c "import json; print(json.load(open('${SUMMARY}')).get('decision','UNKNOWN'))")
+            REGIME=$(python3 -c "import json; print(json.load(open('${SUMMARY}')).get('regime_label','na'))")
+          else
+            DECISION="UNKNOWN"
+            REGIME="na"
+          fi
+          echo "decision=${DECISION}" >> "$GITHUB_OUTPUT"
+          echo "regime=${REGIME}" >> "$GITHUB_OUTPUT"
+          echo "run_dir=${RUN_DIR}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate run
+        id: validate
+        run: |
+          python validate_run.py --run ${{ steps.shadow.outputs.run_dir }}
+
+      - name: Notify Telegram on success
+        if: success()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          RUN_ID="${{ steps.run.outputs.run_id }}"
+          DECISION="${{ steps.shadow.outputs.decision }}"
+          REGIME="${{ steps.shadow.outputs.regime }}"
+          TEXT=$(printf '\xe2\x9c\x85 SHADOW OK | PLTR | RUN_ID=%s | DECISION=%s | REGIME=%s' \
+            "$RUN_ID" "$DECISION" "$REGIME")
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${TEXT}" || true
+
+      - name: Notify Telegram on failure
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          RUN_ID="${{ steps.run.outputs.run_id }}"
+          # Determine which step failed
+          if [ "${{ steps.run.outcome }}" = "failure" ]; then
+            STEP_NAME="run"
+          elif [ "${{ steps.validate.outcome }}" = "failure" ]; then
+            STEP_NAME="validate"
+          else
+            STEP_NAME="unknown"
+          fi
+          # Safety: only log token length + last 3 chars of chat id
+          TOKEN_LEN=${#TELEGRAM_BOT_TOKEN}
+          CHAT_TAIL="${TELEGRAM_CHAT_ID: -3}"
+          echo "Telegram token length: ${TOKEN_LEN}, chat_id tail: ...${CHAT_TAIL}"
+          TEXT=$(printf '\xe2\x9d\x8c SHADOW FAIL | PLTR | RUN_ID=%s | STEP=%s' \
+            "${RUN_ID:-na}" "$STEP_NAME")
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=${TEXT}" || true

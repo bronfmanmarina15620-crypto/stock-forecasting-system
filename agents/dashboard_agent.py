@@ -37,6 +37,9 @@ class DashboardAgent(BaseAgent):
             # Phase 6: Load robustness summary (safe fallback)
             robustness_summary = self._load_robustness_summary()
 
+            # Phase 7: Load shadow summary (safe fallback)
+            shadow_summary = self._load_shadow_summary()
+
             # Generate final HTML report
             html_report = self._generate_html_report(
                 data_output=data_output,
@@ -62,6 +65,7 @@ class DashboardAgent(BaseAgent):
                 vol_regime_latest=vol_regime_latest,
                 regime_breakdown=regime_breakdown,
                 robustness_summary=robustness_summary,
+                shadow_summary=shadow_summary,
             )
 
             # Embed deterministic content fingerprint
@@ -119,6 +123,16 @@ class DashboardAgent(BaseAgent):
         """Load Phase 6 RobustnessAgent/summary.json, returning empty dict on absence."""
         path = os.path.join(
             self.run_dir, "RobustnessAgent", "summary.json"
+        )
+        if not os.path.exists(path):
+            return {}
+        with open(path, "r") as f:
+            return json.load(f)
+
+    def _load_shadow_summary(self) -> Dict[str, Any]:
+        """Load Phase 7 ShadowMonitorAgent/shadow_metrics.json, returning empty dict on absence."""
+        path = os.path.join(
+            self.run_dir, "ShadowMonitorAgent", "shadow_metrics.json"
         )
         if not os.path.exists(path):
             return {}
@@ -673,7 +687,19 @@ class DashboardAgent(BaseAgent):
             },
         }
 
-        return {
+        # Phase 7: shadow summary (optional)
+        shadow_data = kwargs.get("shadow_summary", {})
+        shadow_section = None
+        if shadow_data:
+            shadow_section = {
+                "decision": shadow_data.get("decision"),
+                "regime_label": shadow_data.get("regime_label"),
+                "status": shadow_data.get("status"),
+                "drift_flags": shadow_data.get("drift_flags", []),
+                "enter_rolling_20": shadow_data.get("enter_rolling_20"),
+            }
+
+        report = {
             "ticker": self.config.ticker,
             "run_timestamp": datetime.now().isoformat(),
             "data": kwargs["data_output"],
@@ -692,3 +718,8 @@ class DashboardAgent(BaseAgent):
             "volatility_regime_breakdown": kwargs.get("regime_breakdown", []),
             "robustness": kwargs.get("robustness_summary", {}),
         }
+
+        if shadow_section is not None:
+            report["shadow"] = shadow_section
+
+        return report

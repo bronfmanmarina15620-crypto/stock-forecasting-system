@@ -127,6 +127,14 @@ def check_file_exists(path: Path, fail_reasons: List[str]) -> bool:
     return True
 
 
+SHADOW_ARTIFACTS = {
+    "ShadowMonitorAgent": [
+        "shadow_metrics.json",
+        "shadow_summary.json",
+    ],
+}
+
+
 def validate_artifacts(run_path: Path) -> Tuple[List[str], List[str]]:
     """Validate that all required artifacts exist."""
     fail_reasons = []
@@ -136,7 +144,14 @@ def validate_artifacts(run_path: Path) -> Tuple[List[str], List[str]]:
     print("STEP 1: Checking Required Artifacts")
     print("=" * 60)
 
-    for folder, files in REQUIRED_ARTIFACTS.items():
+    # Build effective artifact map: always include baseline,
+    # conditionally include shadow artifacts when they exist on disk.
+    effective = dict(REQUIRED_ARTIFACTS)
+    shadow_dir = run_path / "ShadowMonitorAgent"
+    if shadow_dir.exists():
+        effective.update(SHADOW_ARTIFACTS)
+
+    for folder, files in effective.items():
         base = run_path if folder == "_ROOT_" else run_path / folder
 
         if not base.exists():
@@ -447,6 +462,12 @@ _CONTENT_HASH_TARGETS = [
     "RobustnessAgent/capacity_test.json",
 ]
 
+# Shadow-mode hash targets — validated only when present.
+_SHADOW_HASH_TARGETS = [
+    "ShadowMonitorAgent/shadow_metrics.json",
+    "ShadowMonitorAgent/shadow_summary.json",
+]
+
 
 def validate_content_hashes(run_path: Path) -> Tuple[List[str], List[str]]:
     """Verify that embedded content_hash_sha256 matches recomputed hash."""
@@ -457,7 +478,12 @@ def validate_content_hashes(run_path: Path) -> Tuple[List[str], List[str]]:
     print("STEP 8: Validating content_hash_sha256 Integrity")
     print("=" * 60)
 
-    for relpath in _CONTENT_HASH_TARGETS:
+    # Include shadow targets when their folder exists
+    targets = list(_CONTENT_HASH_TARGETS)
+    if (run_path / "ShadowMonitorAgent").exists():
+        targets.extend(_SHADOW_HASH_TARGETS)
+
+    for relpath in targets:
         filepath = run_path / relpath
         if not filepath.exists():
             # Missing files are already caught by validate_artifacts

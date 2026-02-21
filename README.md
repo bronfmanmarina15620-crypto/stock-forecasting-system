@@ -52,6 +52,9 @@ python validate_run.py --run runs/PLTR/20240214_120000_abc123
 - `v0.5.0-phase6-robustness` — Phase 6 robustness & statistical validation
   - Adds RobustnessAgent with walk-forward validation, parameter sensitivity, Monte Carlo reshuffle, exposure decomposition, regime contribution, capacity test
   - Integrated into dashboard (HTML + JSON) and validate_run.py
+- `v0.6.0-phase7-shadow` — Phase 7 shadow mode (monitoring-only paper-run)
+  - Adds ShadowMonitorAgent with drift metrics, rolling ENTER frequency, degraded mode
+  - New `--mode shadow` CLI flag; nightly GitHub Action + Telegram notifications
 
 ## 📁 Project Structure
 
@@ -328,6 +331,46 @@ python validate_run.py --run runs/PLTR/<RUN_ID>
 
 Phase 6 artifacts are included in `final_report.json` under the `robustness` key and displayed in `final_report.html`.
 
+## Phase 7: Shadow Mode (Live Paper-Run, Monitoring Only)
+
+Shadow mode runs the full pipeline end-to-end and produces a monitoring snapshot — **without ever placing orders or calling any broker API**.
+
+### How to run
+
+```bash
+# Shadow mode (monitoring-only)
+python run.py --ticker PLTR --mode shadow
+
+# Validate the run
+python validate_run.py --run runs/PLTR/<RUN_ID>
+```
+
+### What it outputs
+
+The `ShadowMonitorAgent` produces two artifacts under `ShadowMonitorAgent/`:
+
+| File | Description |
+|------|-------------|
+| `shadow_metrics.json` | Full monitoring payload (decision, regime, drift flags, rolling ENTER frequency) |
+| `shadow_summary.json` | Compact single-line oriented summary |
+
+Both include `content_hash_sha256` for determinism validation.
+
+A per-ticker append-only history is maintained at `runs/<TICKER>/_shadow_history/shadow_history.jsonl` for computing rolling metrics (e.g., ENTER frequency over the last 20 runs). This file is stateful and excluded from determinism checks.
+
+When present, the shadow summary is also included in `final_report.json` under the `shadow` key.
+
+### What it does NOT do
+
+- **No trading / no execution**: Shadow mode never places orders
+- **No broker API calls**: There is no broker code at all
+- **No new strategy**: Uses the existing MA150-ATR pipeline as-is
+- **No intraday data**: EOD-only, same data retrieval as backtest mode
+
+### Nightly automation
+
+A GitHub Actions workflow (`.github/workflows/nightly_pltr_shadow.yml`) runs shadow mode daily at 23:00 Israel time and sends a Telegram notification on success/failure.
+
 ## 🛡️ Safety Features
 
 ### Data Leakage Prevention
@@ -484,6 +527,6 @@ This system is for educational and research purposes. Past performance does not 
 
 ---
 
-**Version**: 0.5.0 (`v0.5.0-phase6-robustness`)
+**Version**: 0.6.0 (`v0.6.0-phase7-shadow`)
 **Last Updated**: 2026-02-21
-**Status**: Production-Ready MVP (Single-Ticker Mode, Phase 6 Robustness Validation)
+**Status**: Production-Ready MVP (Single-Ticker Mode, Phase 7 Shadow Monitoring)
