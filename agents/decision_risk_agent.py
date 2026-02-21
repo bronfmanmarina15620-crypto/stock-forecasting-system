@@ -125,6 +125,11 @@ class DecisionRiskAgent(BaseAgent):
                 strategy_signals, strategy_explain
             )
 
+            # ----------------------------------------------------------
+            # Phase 5: Volatility regime override
+            # ----------------------------------------------------------
+            decision_action = self._apply_volatility_regime(decision_action)
+
             # Generate abstain stats
             abstain_stats = self._generate_abstain_stats(signals, decision_explain)
 
@@ -320,6 +325,60 @@ class DecisionRiskAgent(BaseAgent):
             "because": reasons,
             "date": last_date,
         }
+
+    # ------------------------------------------------------------------
+    # Phase 5: Volatility regime filter
+    # ------------------------------------------------------------------
+
+    def _apply_volatility_regime(
+        self, decision_action: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Apply Phase 5 volatility regime filter to the decision.
+
+        - If regime == EXTREME: force ABSTAIN regardless of strategy signal.
+        - Attach size multiplier fields for downstream consumers.
+        """
+        # Load volatility regime latest (safe fallback if agent disabled)
+        vr_latest_path = os.path.join(
+            self.run_dir, "VolatilityRegimeAgent", "regime_latest.json"
+        )
+        if not os.path.exists(vr_latest_path):
+            # Agent not present or disabled — no override
+            decision_action["volatility_regime"] = None
+            decision_action["volatility_size_multiplier"] = 1.0
+            return decision_action
+
+        with open(vr_latest_path, "r") as f:
+            vr_latest = json.load(f)
+
+        regime = vr_latest.get("regime", "NORMAL")
+        multiplier = float(vr_latest.get("multiplier", 1.0))
+
+        # Attach volatility info to decision
+        decision_action["volatility_regime"] = regime
+        decision_action["volatility_size_multiplier"] = multiplier
+
+        # EXTREME blocks ENTER -> force ABSTAIN
+        if regime == "EXTREME" and decision_action.get("action") == "ENTER":
+            decision_action["action"] = "ABSTAIN"
+            decision_action["position"] = 0
+            because = decision_action.get("because", [])
+            if not isinstance(because, list):
+                because = []
+            because.append("blocked_by_volatility_regime_extreme")
+            decision_action["because"] = because
+            self.logger.info(
+                "Phase 5: EXTREME volatility regime — "
+                "forced ABSTAIN (blocked ENTER)"
+            )
+
+        # Ensure ABSTAIN has a because list (validator requirement)
+        if decision_action.get("action") == "ABSTAIN":
+            because = decision_action.get("because", [])
+            if not because:
+                decision_action["because"] = ["No entry signal"]
+
+        return decision_action
 
     def _generate_abstain_stats(
         self, signals: pd.DataFrame, decision_explain: Dict[str, Any]

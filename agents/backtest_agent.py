@@ -139,6 +139,10 @@ class BacktestAgent(BaseAgent):
             # Phase 4 artifact
             self.save_artifact('risk_explain.json', risk_explain)
 
+            # Phase 5: regime breakdown (join trades with volatility regime)
+            regime_breakdown = self._build_regime_breakdown(trades)
+            self.save_artifact('regime_breakdown.json', regime_breakdown)
+
             # Legacy ML stubs — isolated under legacy_ml/ subfolder
             stub_sanity = {}
             if emit_stubs:
@@ -1018,6 +1022,61 @@ class BacktestAgent(BaseAgent):
     # ------------------------------------------------------------------
     # Shared helpers
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Phase 5: Volatility regime breakdown
+    # ------------------------------------------------------------------
+
+    def _build_regime_breakdown(
+        self, trades_df: pd.DataFrame
+    ) -> list:
+        """Build per-regime performance breakdown from completed trades.
+
+        Joins each trade's entry_date with the VolatilityRegimeAgent
+        regime_series.parquet to tag each trade by regime at entry.
+        Returns a list of dicts (one per regime) for JSON serialization.
+        """
+        regime_path = os.path.join(
+            self.run_dir, 'VolatilityRegimeAgent', 'regime_series.parquet'
+        )
+        if not os.path.exists(regime_path) or len(trades_df) == 0:
+            return []
+
+        regime_df = pd.read_parquet(regime_path)
+        # Build date -> regime lookup
+        regime_df['date_str'] = regime_df['date'].apply(
+            lambda d: str(d.date()) if hasattr(d, 'date') else str(d)
+        )
+        date_regime_map = dict(
+            zip(regime_df['date_str'], regime_df['regime'])
+        )
+
+        # Tag each trade with regime at entry
+        trades_df = trades_df.copy()
+        trades_df['vol_regime'] = trades_df['entry_date'].map(date_regime_map)
+        trades_df['vol_regime'] = trades_df['vol_regime'].fillna('UNKNOWN')
+
+        breakdown = []
+        for regime, group in sorted(trades_df.groupby('vol_regime')):
+            n = len(group)
+            returns = group['return']
+            wins = int((returns > 0).sum())
+            avg_ret = float(returns.mean()) if n > 0 else 0.0
+
+            # avg R if r_multiple column exists
+            avg_r = 0.0
+            if 'r_multiple' in group.columns:
+                avg_r = float(group['r_multiple'].mean())
+
+            breakdown.append({
+                'regime': regime,
+                'trade_count': n,
+                'win_rate': float(wins / n) if n > 0 else 0.0,
+                'avg_return': avg_ret,
+                'avg_r_multiple': avg_r,
+            })
+
+        return breakdown
 
     def _generate_costs_assumptions(self) -> Dict[str, Any]:
         """Document trading cost assumptions."""

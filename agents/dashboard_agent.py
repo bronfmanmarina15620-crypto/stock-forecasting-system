@@ -3,6 +3,7 @@ DashboardAgent - Generates final dashboard and HTML report.
 """
 
 import json
+import os
 
 import pandas as pd
 from typing import Dict, Any
@@ -29,6 +30,10 @@ class DashboardAgent(BaseAgent):
             decision_output = self.load_agent_output("DecisionRiskAgent")
             portfolio_output = self.load_agent_output("PortfolioAgent")
 
+            # Phase 5: Load volatility regime data (safe fallback)
+            vol_regime_latest = self._load_volatility_regime_latest()
+            regime_breakdown = self._load_regime_breakdown()
+
             # Generate final HTML report
             html_report = self._generate_html_report(
                 data_output=data_output,
@@ -39,6 +44,8 @@ class DashboardAgent(BaseAgent):
                 strategy_output=strategy_output,
                 decision_output=decision_output,
                 portfolio_output=portfolio_output,
+                vol_regime_latest=vol_regime_latest,
+                regime_breakdown=regime_breakdown,
             )
 
             # Generate JSON report
@@ -48,6 +55,8 @@ class DashboardAgent(BaseAgent):
                 strategy_output=strategy_output,
                 decision_output=decision_output,
                 portfolio_output=portfolio_output,
+                vol_regime_latest=vol_regime_latest,
+                regime_breakdown=regime_breakdown,
             )
 
             # Embed deterministic content fingerprint
@@ -77,6 +86,30 @@ class DashboardAgent(BaseAgent):
             self.logger.error(f"Dashboard generation failed: {str(e)}")
             return {"status": "FAILED", "error": str(e)}
 
+    # ------------------------------------------------------------------
+    # Phase 5: Volatility regime helpers
+    # ------------------------------------------------------------------
+
+    def _load_volatility_regime_latest(self) -> Dict[str, Any]:
+        """Load regime_latest.json, returning empty dict on absence."""
+        path = os.path.join(
+            self.run_dir, "VolatilityRegimeAgent", "regime_latest.json"
+        )
+        if not os.path.exists(path):
+            return {}
+        with open(path, "r") as f:
+            return json.load(f)
+
+    def _load_regime_breakdown(self) -> list:
+        """Load regime_breakdown.json, returning empty list on absence."""
+        path = os.path.join(
+            self.run_dir, "BacktestAgent", "regime_breakdown.json"
+        )
+        if not os.path.exists(path):
+            return []
+        with open(path, "r") as f:
+            return json.load(f)
+
     def _generate_html_report(self, **kwargs) -> str:
         """Generate comprehensive HTML report."""
         data_output = kwargs["data_output"]
@@ -103,6 +136,33 @@ class DashboardAgent(BaseAgent):
 
         # Phase 3 backtest metrics
         bt_metrics = backtest_output.get("metrics", {})
+
+        # Phase 5 volatility regime
+        vol_regime_latest = kwargs.get("vol_regime_latest", {})
+        regime_breakdown = kwargs.get("regime_breakdown", [])
+        vr_regime = vol_regime_latest.get("regime", "N/A")
+        vr_ratio = vol_regime_latest.get("atr_ratio")
+        vr_slope = vol_regime_latest.get("atr_slope")
+        vr_mult = vol_regime_latest.get("multiplier", 1.0)
+        vr_thresholds = vol_regime_latest.get("thresholds", {})
+
+        vr_ratio_str = f"{vr_ratio:.3f}" if vr_ratio is not None else "N/A"
+        vr_slope_str = f"{vr_slope:.6f}" if vr_slope is not None else "N/A"
+
+        # Build regime breakdown table rows
+        rb_rows = ""
+        for rb in regime_breakdown:
+            rb_rows += (
+                f"<tr>"
+                f"<td>{rb['regime']}</td>"
+                f"<td>{rb['trade_count']}</td>"
+                f"<td>{rb['win_rate']:.1%}</td>"
+                f"<td>{rb['avg_return']:.2%}</td>"
+                f"<td>{rb['avg_r_multiple']:.2f}</td>"
+                f"</tr>"
+            )
+        if not rb_rows:
+            rb_rows = "<tr><td colspan='5'>No trades to break down</td></tr>"
 
         html = f"""
 <!DOCTYPE html>
@@ -315,6 +375,44 @@ class DashboardAgent(BaseAgent):
             </div>
         </div>
 
+        <h2>Volatility Regime (Phase 5)</h2>
+        <div class="card">
+            <div class="metric">
+                <span class="metric-label">Current Regime:</span>
+                <span class="metric-value">{vr_regime}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">ATR Ratio (14/100):</span>
+                <span class="metric-value">{vr_ratio_str}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">ATR Slope:</span>
+                <span class="metric-value">{vr_slope_str}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Size Multiplier:</span>
+                <span class="metric-value">{vr_mult}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Thresholds:</span>
+                <span class="metric-value">quiet&lt;{vr_thresholds.get('quiet', 0.8)}, expand&gt;{vr_thresholds.get('expansion', 1.2)}, extreme&gt;{vr_thresholds.get('extreme', 1.5)}</span>
+            </div>
+        </div>
+
+        <h2>Regime Breakdown (Phase 5)</h2>
+        <div class="card">
+            <table>
+                <tr>
+                    <th>Regime</th>
+                    <th>Trades</th>
+                    <th>Win Rate</th>
+                    <th>Avg Return</th>
+                    <th>Avg R</th>
+                </tr>
+                {rb_rows}
+            </table>
+        </div>
+
         <h2>ML Validation</h2>
         <div class="card">
             <div class="metric">
@@ -487,4 +585,6 @@ class DashboardAgent(BaseAgent):
             },
             "decision": decision_output,
             "portfolio": kwargs["portfolio_output"],
+            "volatility_regime": kwargs.get("vol_regime_latest", {}),
+            "volatility_regime_breakdown": kwargs.get("regime_breakdown", []),
         }

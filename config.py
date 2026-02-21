@@ -98,6 +98,24 @@ class PortfolioConfig:
 
 
 @dataclass
+class VolatilityRegimeConfig:
+    """Phase 5 volatility regime filter parameters."""
+    enabled: bool = True
+    atr_short: int = 14
+    atr_long: int = 100
+    quiet_threshold: float = 0.8
+    expansion_threshold: float = 1.2
+    extreme_threshold: float = 1.5
+    slope_lookback: int = 10
+    size_multipliers: Dict[str, float] = field(default_factory=lambda: {
+        "quiet": 0.5,
+        "normal": 1.0,
+        "expanding": 0.5,
+        "extreme": 0.0,
+    })
+
+
+@dataclass
 class StrategyConfig:
     """Phase 2 MA150+ATR strategy parameters.
 
@@ -111,6 +129,10 @@ class StrategyConfig:
     atr_pct_high: float = 0.04
     slope_min: float = 0.0
     risk_per_trade: float = 0.005  # placeholder for Phase 4
+    volatility_regime_enabled: bool = True
+    volatility_regime: VolatilityRegimeConfig = field(
+        default_factory=VolatilityRegimeConfig
+    )
 
 
 @dataclass
@@ -132,7 +154,16 @@ def _load_strategy_yaml(filepath: str) -> Dict[str, Any]:
         return {}
     # Only extract keys recognised by StrategyConfig (skip 'costs' block)
     allowed = {f.name for f in StrategyConfig.__dataclass_fields__.values()}
-    return {k: v for k, v in raw.items() if k in allowed}
+    result = {k: v for k, v in raw.items() if k in allowed}
+    # Convert nested volatility_regime dict to VolatilityRegimeConfig
+    vr = result.get('volatility_regime')
+    if isinstance(vr, dict):
+        # 'enabled' lives at top level in YAML but maps to
+        # volatility_regime_enabled on StrategyConfig
+        if 'enabled' in vr:
+            result['volatility_regime_enabled'] = vr.pop('enabled')
+        result['volatility_regime'] = VolatilityRegimeConfig(**vr)
+    return result
 
 
 @dataclass
@@ -178,7 +209,11 @@ class SystemConfig:
         data['decision'] = DecisionConfig(**data.get('decision', {}))
         data['portfolio'] = PortfolioConfig(**data.get('portfolio', {}))
         data['memory'] = MemoryConfig(**data.get('memory', {}))
-        data['strategy'] = StrategyConfig(**data.get('strategy', {}))
+        strategy_raw = data.get('strategy', {})
+        vr_raw = strategy_raw.get('volatility_regime')
+        if isinstance(vr_raw, dict):
+            strategy_raw['volatility_regime'] = VolatilityRegimeConfig(**vr_raw)
+        data['strategy'] = StrategyConfig(**strategy_raw)
         return cls(**data)
     
     @classmethod

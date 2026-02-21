@@ -19,6 +19,21 @@ costs:
 
 risk_per_trade: 0.005    # Phase 4: fraction of equity risked per trade
 
+# Phase 5: Volatility regime filter — ATR ratio + slope classification
+volatility_regime:
+  enabled: true
+  atr_short: 14
+  atr_long: 100
+  quiet_threshold: 0.8
+  expansion_threshold: 1.2
+  extreme_threshold: 1.5
+  slope_lookback: 10
+  size_multipliers:
+    quiet: 0.5
+    normal: 1.0
+    expanding: 0.5
+    extreme: 0.0
+
 # Phase 4 risk management — wired to BacktestConfig.
 # Override via BacktestConfig if needed; values here for documentation.
 risk_management:
