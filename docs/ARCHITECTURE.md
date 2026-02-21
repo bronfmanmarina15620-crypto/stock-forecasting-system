@@ -14,7 +14,7 @@ Default action is always ABSTAIN.
 ## Pipeline Stages
 
 ```
-Data -> Features -> Regime -> EventModel -> Backtest -> Decision/Risk -> Portfolio -> Dashboard -> Memory
+Data -> Features -> Regime -> EventModel -> Backtest -> Decision/Risk -> Portfolio -> [ShadowMonitor] -> Dashboard -> Memory
 ```
 
 | # | Stage           | Agent                | Purpose                                    |
@@ -26,10 +26,12 @@ Data -> Features -> Regime -> EventModel -> Backtest -> Decision/Risk -> Portfol
 | 5 | Backtest        | `BacktestAgent`      | Walk-forward OOS evaluation with costs      |
 | 6 | Decision/Risk   | `DecisionRiskAgent`  | ENTER/ABSTAIN logic + P&L + abstain stats   |
 | 7 | Portfolio       | `PortfolioAgent`     | Position sizing (PASSIVE mode, no execution)|
+| 7b| Shadow Monitor  | `ShadowMonitorAgent` | Drift metrics + monitoring (shadow mode only, Phase 7) |
 | 8 | Dashboard       | `DashboardAgent`     | Generate final_report.html + final_report.json |
 | 9 | Memory          | `MemoryLearningAgent`| Store run metrics, generate suggestions     |
 
 The `OrchestratorAgent` coordinates execution. No agent calls another directly.
+In shadow mode (`--mode shadow`), `ShadowMonitorAgent` is inserted before `DashboardAgent`.
 
 ---
 
@@ -52,6 +54,7 @@ The `OrchestratorAgent` coordinates execution. No agent calls another directly.
 | `agents/backtest_agent.py`       | Walk-forward backtest with cost modeling     |
 | `agents/decision_risk_agent.py`  | Signal generation, PnL, abstain stats        |
 | `agents/portfolio_agent.py`      | PASSIVE portfolio plan                       |
+| `agents/shadow_monitor_agent.py` | Shadow mode drift metrics (Phase 7)          |
 | `agents/dashboard_agent.py`      | HTML + JSON report generation                |
 | `agents/memory_learning_agent.py`| SQLite persistence, suggestions              |
 | `datasources/yahoo_finance.py`   | yfinance adapter with caching                |
@@ -70,6 +73,7 @@ The `OrchestratorAgent` coordinates execution. No agent calls another directly.
 | File                                    | Role                             |
 |-----------------------------------------|----------------------------------|
 | `.github/workflows/nightly_pltr.yml`    | Nightly scheduled run + Telegram |
+| `.github/workflows/nightly_pltr_shadow.yml` | Nightly shadow mode run + Telegram |
 | `scripts/smoke_test_10_runs.sh`         | 10-run stability gate            |
 | `scripts/daily_run.sh`                  | Daily pipeline + validation      |
 

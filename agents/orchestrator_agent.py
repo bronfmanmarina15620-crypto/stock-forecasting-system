@@ -15,9 +15,11 @@ from .event_model_agent import EventModelAgent
 from .backtest_agent import BacktestAgent
 from .strategy_agent import StrategyAgent
 from .decision_risk_agent import DecisionRiskAgent
+from .robustness_agent import RobustnessAgent
 from .portfolio_agent import PortfolioAgent
 from .dashboard_agent import DashboardAgent
 from .memory_learning_agent import MemoryLearningAgent
+from .shadow_monitor_agent import ShadowMonitorAgent
 
 
 class OrchestratorAgent(BaseAgent):
@@ -38,15 +40,33 @@ class OrchestratorAgent(BaseAgent):
             EventModelAgent,
             StrategyAgent,
             BacktestAgent,
+            RobustnessAgent,
             DecisionRiskAgent,
             PortfolioAgent,
             DashboardAgent,
             MemoryLearningAgent,
         ]
 
-    def run(self) -> Dict[str, Any]:
-        """Execute all agents in order."""
-        self.logger.info(f"Starting orchestration for {self.config.ticker}")
+    def run(self, mode: str = "backtest") -> Dict[str, Any]:
+        """Execute all agents in order.
+
+        Parameters
+        ----------
+        mode : str
+            ``"backtest"`` (default) or ``"shadow"`` (monitoring-only).
+        """
+        self.logger.info(f"Starting orchestration for {self.config.ticker} (mode={mode})")
+
+        # Build the agent list for this run.  In shadow mode, insert
+        # ShadowMonitorAgent before DashboardAgent.  Use a local copy so
+        # self.agent_classes is never mutated (safe for repeated calls).
+        agent_classes = list(self.agent_classes)
+        if mode == "shadow":
+            dashboard_idx = next(
+                i for i, cls in enumerate(agent_classes)
+                if cls.__name__ == "DashboardAgent"
+            )
+            agent_classes.insert(dashboard_idx, ShadowMonitorAgent)
 
         results = {}
         stage_status = {}
@@ -54,7 +74,7 @@ class OrchestratorAgent(BaseAgent):
         errors = []
 
         # Execute each agent
-        for agent_class in self.agent_classes:
+        for agent_class in agent_classes:
             agent_name = agent_class.__name__
             self.logger.info(f"Executing {agent_name}...")
             stage_start = datetime.now()

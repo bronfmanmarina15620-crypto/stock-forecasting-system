@@ -42,6 +42,19 @@ python run.py --ticker PLTR --config my_config.json
 python validate_run.py --run runs/PLTR/20240214_120000_abc123
 ```
 
+### Shadow Mode (Paper-Run, No Trading)
+
+```bash
+# Run in monitoring-only mode — no orders, no broker calls
+python run.py --ticker PLTR --mode shadow
+
+# Validate (same command, works for both modes)
+python validate_run.py --run runs/PLTR/<RUN_ID>
+```
+
+Shadow artifacts: `runs/PLTR/<RUN_ID>/ShadowMonitorAgent/shadow_metrics.json`
+and `shadow_summary.json`. See [Phase 7](#phase-7-shadow-mode-live-paper-run-monitoring-only) for details.
+
 ### Release Tags
 
 - `v0.4.0-phase4-risk` — Phase 4 risk sizing integration (risk_explain.json + Phase 4 metrics + dashboard + validate_run)
@@ -49,6 +62,12 @@ python validate_run.py --run runs/PLTR/20240214_120000_abc123
 - `v0.4.2-phase5-volatility-regime` — Phase 5 volatility regime filter
   - Adds VolatilityRegimeAgent (ATR ratio + slope) with regimes QUIET/NORMAL/EXPANDING/EXTREME
   - EXTREME blocks ENTER and applies regime multiplier to position sizing; adds regime breakdown in backtest + dashboard
+- `v0.5.0-phase6-robustness` — Phase 6 robustness & statistical validation
+  - Adds RobustnessAgent with walk-forward validation, parameter sensitivity, Monte Carlo reshuffle, exposure decomposition, regime contribution, capacity test
+  - Integrated into dashboard (HTML + JSON) and validate_run.py
+- `v0.6.0-phase7-shadow` — Phase 7 shadow mode (monitoring-only paper-run)
+  - Adds ShadowMonitorAgent with drift metrics, rolling ENTER frequency, degraded mode
+  - New `--mode shadow` CLI flag; nightly GitHub Action + Telegram notifications
 
 ## 📁 Project Structure
 
@@ -61,7 +80,7 @@ stock-forecasting-system/
 ├── utils.py                    # Utility functions
 ├── requirements.txt            # Dependencies
 │
-├── agents/                     # All 11 agents
+├── agents/                     # All 12 agents
 │   ├── __init__.py
 │   ├── base_agent.py           # Base agent class
 │   ├── orchestrator_agent.py   # Agent 1: Coordinator
@@ -72,6 +91,7 @@ stock-forecasting-system/
 │   ├── event_model_agent.py    # Agent 5: Event model training
 │   ├── backtest_agent.py       # Agent 6: Walk-forward backtest
 │   ├── decision_risk_agent.py  # Agent 7: Decision making
+│   ├── robustness_agent.py     # Agent 7b: Robustness validation (Phase 6)
 │   ├── portfolio_agent.py      # Agent 8: Portfolio planning
 │   ├── dashboard_agent.py      # Agent 9: Dashboard generation
 │   └── memory_learning_agent.py # Agent 10: Memory & learning
@@ -283,6 +303,87 @@ VolatilityRegimeAgent classifies each day into QUIET / NORMAL / EXPANDING / EXTR
 
 DecisionRiskAgent applies the multiplier and blocks ENTER during EXTREME regimes. Dashboard and final report include the latest regime, thresholds, and a per-regime trade breakdown.
 
+## Phase 6: Robustness & Statistical Validation
+
+RobustnessAgent runs after BacktestAgent and produces evaluation/validation outputs without changing any trading logic.
+
+### Analyses
+
+| Analysis | Description |
+|----------|-------------|
+| Walk-Forward Validation | Rolling train/test windows (6 default) — same strategy params, segmented evaluation |
+| Parameter Sensitivity Map | Grid around `atr_mult` (±20%) and `risk_pct` (±50%) — 25 grid points |
+| Monte Carlo Trade Reshuffle | 1000 reshuffles of realized trade returns with fixed seed |
+| Exposure Decomposition | Time-in-market, avg exposure, high-vol regime exposure, benchmark correlation |
+| Regime Contribution | Performance split by volatility regime buckets (QUIET/NORMAL/EXPANDING/EXTREME) |
+| Capacity Test | Max position vs ADV estimate — categorized tiny/small/moderate/large |
+
+### Artifacts
+
+All outputs saved under `runs/<TICKER>/<RUN_ID>/RobustnessAgent/`:
+
+| File | Format | Description |
+|------|--------|-------------|
+| `summary.json` | JSON | Top-level summary with key risk stats |
+| `walk_forward.json` | JSON | Per-window walk-forward results |
+| `walk_forward.csv` | CSV | Same, tabular |
+| `sensitivity_map.json` | JSON | Grid search results |
+| `sensitivity_map.csv` | CSV | Same, tabular |
+| `monte_carlo.json` | JSON | Reshuffle simulation (percentiles, distribution) |
+| `monte_carlo.csv` | CSV | Distribution summary |
+| `exposure_decomposition.json` | JSON | Exposure analysis |
+| `regime_contribution.json` | JSON | Per-regime performance buckets |
+| `capacity_test.json` | JSON | ADV ratio and categorization |
+
+### How to run
+
+```bash
+python run.py --ticker PLTR
+python validate_run.py --run runs/PLTR/<RUN_ID>
+```
+
+Phase 6 artifacts are included in `final_report.json` under the `robustness` key and displayed in `final_report.html`.
+
+## Phase 7: Shadow Mode (Live Paper-Run, Monitoring Only)
+
+Shadow mode runs the full pipeline end-to-end and produces a monitoring snapshot — **without ever placing orders or calling any broker API**.
+
+### How to run
+
+```bash
+# Shadow mode (monitoring-only)
+python run.py --ticker PLTR --mode shadow
+
+# Validate the run
+python validate_run.py --run runs/PLTR/<RUN_ID>
+```
+
+### What it outputs
+
+The `ShadowMonitorAgent` produces two artifacts under `ShadowMonitorAgent/`:
+
+| File | Description |
+|------|-------------|
+| `shadow_metrics.json` | Full monitoring payload (decision, regime, drift flags, rolling ENTER frequency) |
+| `shadow_summary.json` | Compact single-line oriented summary |
+
+Both include `content_hash_sha256` for determinism validation.
+
+A per-ticker append-only history is maintained at `runs/<TICKER>/_shadow_history/shadow_history.jsonl` for computing rolling metrics (e.g., ENTER frequency over the last 20 runs). This file is stateful and excluded from determinism checks.
+
+When present, the shadow summary is also included in `final_report.json` under the `shadow` key.
+
+### What it does NOT do
+
+- **No trading / no execution**: Shadow mode never places orders
+- **No broker API calls**: There is no broker code at all
+- **No new strategy**: Uses the existing MA150-ATR pipeline as-is
+- **No intraday data**: EOD-only, same data retrieval as backtest mode
+
+### Nightly automation
+
+A GitHub Actions workflow (`.github/workflows/nightly_pltr_shadow.yml`) runs shadow mode daily at 23:00 Israel time and sends a Telegram notification on success/failure.
+
 ## 🛡️ Safety Features
 
 ### Data Leakage Prevention
@@ -439,6 +540,6 @@ This system is for educational and research purposes. Past performance does not 
 
 ---
 
-**Version**: 0.4.2 (`v0.4.2-phase5-volatility-regime`)
+**Version**: 0.6.0 (`v0.6.0-phase7-shadow`)
 **Last Updated**: 2026-02-21
-**Status**: Production-Ready MVP (Single-Ticker Mode, Phase 5 Volatility Regime Filter)
+**Status**: Production-Ready MVP (Single-Ticker Mode, Phase 7 Shadow Monitoring)

@@ -34,6 +34,12 @@ class DashboardAgent(BaseAgent):
             vol_regime_latest = self._load_volatility_regime_latest()
             regime_breakdown = self._load_regime_breakdown()
 
+            # Phase 6: Load robustness summary (safe fallback)
+            robustness_summary = self._load_robustness_summary()
+
+            # Phase 7: Load shadow summary (safe fallback)
+            shadow_summary = self._load_shadow_summary()
+
             # Generate final HTML report
             html_report = self._generate_html_report(
                 data_output=data_output,
@@ -46,6 +52,7 @@ class DashboardAgent(BaseAgent):
                 portfolio_output=portfolio_output,
                 vol_regime_latest=vol_regime_latest,
                 regime_breakdown=regime_breakdown,
+                robustness_summary=robustness_summary,
             )
 
             # Generate JSON report
@@ -57,6 +64,8 @@ class DashboardAgent(BaseAgent):
                 portfolio_output=portfolio_output,
                 vol_regime_latest=vol_regime_latest,
                 regime_breakdown=regime_breakdown,
+                robustness_summary=robustness_summary,
+                shadow_summary=shadow_summary,
             )
 
             # Embed deterministic content fingerprint
@@ -107,6 +116,26 @@ class DashboardAgent(BaseAgent):
         )
         if not os.path.exists(path):
             return []
+        with open(path, "r") as f:
+            return json.load(f)
+
+    def _load_robustness_summary(self) -> Dict[str, Any]:
+        """Load Phase 6 RobustnessAgent/summary.json, returning empty dict on absence."""
+        path = os.path.join(
+            self.run_dir, "RobustnessAgent", "summary.json"
+        )
+        if not os.path.exists(path):
+            return {}
+        with open(path, "r") as f:
+            return json.load(f)
+
+    def _load_shadow_summary(self) -> Dict[str, Any]:
+        """Load Phase 7 ShadowMonitorAgent/shadow_metrics.json, returning empty dict on absence."""
+        path = os.path.join(
+            self.run_dir, "ShadowMonitorAgent", "shadow_metrics.json"
+        )
+        if not os.path.exists(path):
+            return {}
         with open(path, "r") as f:
             return json.load(f)
 
@@ -163,6 +192,10 @@ class DashboardAgent(BaseAgent):
             )
         if not rb_rows:
             rb_rows = "<tr><td colspan='5'>No trades to break down</td></tr>"
+
+        # Phase 6: Robustness summary
+        robustness_summary = kwargs.get("robustness_summary", {})
+        robustness_html = self._generate_robustness_html(robustness_summary)
 
         html = f"""
 <!DOCTYPE html>
@@ -413,6 +446,8 @@ class DashboardAgent(BaseAgent):
             </table>
         </div>
 
+        {robustness_html}
+
         <h2>ML Validation</h2>
         <div class="card">
             <div class="metric">
@@ -515,6 +550,88 @@ class DashboardAgent(BaseAgent):
         """
         return html
 
+    def _generate_robustness_html(self, summary: Dict[str, Any]) -> str:
+        """Generate Phase 6 robustness HTML section."""
+        if not summary:
+            return ""
+
+        wf = summary.get("walk_forward_stability", {})
+        mc = summary.get("monte_carlo_tail_risk", {})
+        sr = summary.get("sensitivity_range", {})
+
+        # Walk-forward summary table
+        wf_html = f"""
+        <h2>Robustness Validation (Phase 6)</h2>
+
+        <h3>Walk-Forward Stability</h3>
+        <div class="card">
+            <div class="metric">
+                <span class="metric-label">Windows:</span>
+                <span class="metric-value">{wf.get('n_windows', 0)}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Mean Return:</span>
+                <span class="metric-value">{wf.get('mean_return', 0):.2%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Std Return:</span>
+                <span class="metric-value">{wf.get('std_return', 0):.2%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Min/Max Return:</span>
+                <span class="metric-value">{wf.get('min_return', 0):.2%} / {wf.get('max_return', 0):.2%}</span>
+            </div>
+        </div>
+        """
+
+        # Monte Carlo percentile block
+        mc_html = f"""
+        <h3>Monte Carlo Tail Risk (1000 reshuffles)</h3>
+        <div class="card">
+            <div class="metric">
+                <span class="metric-label">Return P5:</span>
+                <span class="metric-value">{mc.get('return_p5', 0):.2%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Return P50:</span>
+                <span class="metric-value">{mc.get('return_p50', 0):.2%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Return P95:</span>
+                <span class="metric-value">{mc.get('return_p95', 0):.2%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Worst DD:</span>
+                <span class="metric-value">{mc.get('dd_worst', 0):.2%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">DD P5:</span>
+                <span class="metric-value">{mc.get('dd_p5', 0):.2%}</span>
+            </div>
+        </div>
+        """
+
+        # Sensitivity heatmap summary (table)
+        sens_html = f"""
+        <h3>Parameter Sensitivity</h3>
+        <div class="card">
+            <div class="metric">
+                <span class="metric-label">Grid Points:</span>
+                <span class="metric-value">{sr.get('grid_points', 0)}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Return Range:</span>
+                <span class="metric-value">{sr.get('min_return', 0):.2%} to {sr.get('max_return', 0):.2%}</span>
+            </div>
+            <div class="metric">
+                <span class="metric-label">Capacity:</span>
+                <span class="metric-value">{summary.get('capacity_category', 'unknown')}</span>
+            </div>
+        </div>
+        """
+
+        return wf_html + mc_html + sens_html
+
     def _generate_json_report(self, **kwargs) -> Dict[str, Any]:
         """Generate JSON summary report with Phase 2 + Phase 3 fields."""
         decision_output = kwargs["decision_output"]
@@ -570,7 +687,19 @@ class DashboardAgent(BaseAgent):
             },
         }
 
-        return {
+        # Phase 7: shadow summary (optional)
+        shadow_data = kwargs.get("shadow_summary", {})
+        shadow_section = None
+        if shadow_data:
+            shadow_section = {
+                "decision": shadow_data.get("decision"),
+                "regime_label": shadow_data.get("regime_label"),
+                "status": shadow_data.get("status"),
+                "drift_flags": shadow_data.get("drift_flags", []),
+                "enter_rolling_20": shadow_data.get("enter_rolling_20"),
+            }
+
+        report = {
             "ticker": self.config.ticker,
             "run_timestamp": datetime.now().isoformat(),
             "data": kwargs["data_output"],
@@ -587,4 +716,10 @@ class DashboardAgent(BaseAgent):
             "portfolio": kwargs["portfolio_output"],
             "volatility_regime": kwargs.get("vol_regime_latest", {}),
             "volatility_regime_breakdown": kwargs.get("regime_breakdown", []),
+            "robustness": kwargs.get("robustness_summary", {}),
         }
+
+        if shadow_section is not None:
+            report["shadow"] = shadow_section
+
+        return report

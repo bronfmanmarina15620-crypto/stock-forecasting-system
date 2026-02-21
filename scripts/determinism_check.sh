@@ -40,6 +40,19 @@ TARGET_FILES=(
   "BacktestAgent/metrics.json"
   "final_report.json"
   "DecisionRiskAgent/decision_action.json"
+  "RobustnessAgent/summary.json"
+  "RobustnessAgent/monte_carlo.json"
+  "RobustnessAgent/walk_forward.json"
+  "RobustnessAgent/sensitivity_map.json"
+  "RobustnessAgent/exposure_decomposition.json"
+  "RobustnessAgent/regime_contribution.json"
+  "RobustnessAgent/capacity_test.json"
+)
+
+# Shadow-mode artifacts — included only when BOTH runs have them.
+SHADOW_FILES=(
+  "ShadowMonitorAgent/shadow_metrics.json"
+  "ShadowMonitorAgent/shadow_summary.json"
 )
 
 TMPDIR_BASE=$(mktemp -d "${TMPDIR:-/tmp}/determinism_XXXXXX")
@@ -119,6 +132,17 @@ if ! python "$ROOT_DIR/validate_run.py" --run "$RUN2_DIR"; then
   exit 1
 fi
 log "Validation passed for run B"
+
+# ── Conditionally include shadow artifacts ─────────────────
+
+for sf in "${SHADOW_FILES[@]}"; do
+  if [[ -f "$RUN1_DIR/$sf" && -f "$RUN2_DIR/$sf" ]]; then
+    TARGET_FILES+=("$sf")
+    log "Including shadow artifact: $sf"
+  elif [[ -f "$RUN1_DIR/$sf" || -f "$RUN2_DIR/$sf" ]]; then
+    log "WARNING: shadow artifact $sf exists in only one run — skipping"
+  fi
+done
 
 # ── Compare target files ────────────────────────────────────
 

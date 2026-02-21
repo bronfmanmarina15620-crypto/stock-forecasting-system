@@ -199,6 +199,14 @@ Examples:
     )
 
     parser.add_argument(
+        '--mode',
+        type=str,
+        choices=['backtest', 'shadow'],
+        default='backtest',
+        help='Run mode: backtest (default) or shadow (monitoring-only, no trading)'
+    )
+
+    parser.add_argument(
         '--lookback-days',
         type=int,
         default=None,
@@ -223,11 +231,13 @@ Examples:
     else:
         ticker = args.ticker
     
+    run_mode = args.mode
+
     print(f"\n{'='*60}")
     print(f"Multi-Agent Stock Forecasting System")
     print(f"{'='*60}")
     print(f"Ticker: {ticker}")
-    print(f"Mode: SINGLE-TICKER (PLTR ONLY)")
+    print(f"Mode: {run_mode.upper()}")
     print(f"{'='*60}\n")
     
     # Load or create configuration
@@ -279,7 +289,7 @@ Examples:
     # Run orchestrator
     try:
         orchestrator = OrchestratorAgent(config, run_dir, logger)
-        result = orchestrator.run()
+        result = orchestrator.run(mode=run_mode)
 
         print(f"\n{'='*60}")
         print(f"Run Status: {result['status']}")
