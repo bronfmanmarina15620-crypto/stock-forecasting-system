@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 
 from .base_agent import BaseAgent
+from determinism import content_hash_sha256
 
 
 # ============================================================
@@ -102,6 +103,9 @@ class RobustnessAgent(BaseAgent):
                 walk_forward, sensitivity, monte_carlo,
                 exposure, regime_contrib, capacity, bt_metrics,
             )
+
+            # ---- Embed content hash for determinism verification ----
+            summary["content_hash_sha256"] = content_hash_sha256(summary)
 
             # ---- Save all artifacts ----
             self.save_artifact("walk_forward.json", walk_forward)

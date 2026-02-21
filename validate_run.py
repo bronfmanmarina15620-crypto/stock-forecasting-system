@@ -438,6 +438,7 @@ _CONTENT_HASH_TARGETS = [
     "BacktestAgent/metrics.json",
     "final_report.json",
     "DecisionRiskAgent/decision_action.json",
+    "RobustnessAgent/summary.json",
 ]
 
 
