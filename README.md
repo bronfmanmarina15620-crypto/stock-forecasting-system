@@ -46,6 +46,9 @@ python validate_run.py --run runs/PLTR/20240214_120000_abc123
 
 - `v0.4.0-phase4-risk` — Phase 4 risk sizing integration (risk_explain.json + Phase 4 metrics + dashboard + validate_run)
 - `v0.4.1-phase4-hardening` — post-release hardening (README docs + schema guard tests + changelog)
+- `v0.4.2-phase5-volatility-regime` — Phase 5 volatility regime filter
+  - Adds VolatilityRegimeAgent (ATR ratio + slope) with regimes QUIET/NORMAL/EXPANDING/EXTREME
+  - EXTREME blocks ENTER and applies regime multiplier to position sizing; adds regime breakdown in backtest + dashboard
 
 ## 📁 Project Structure
 
@@ -58,13 +61,14 @@ stock-forecasting-system/
 ├── utils.py                    # Utility functions
 ├── requirements.txt            # Dependencies
 │
-├── agents/                     # All 10 agents
+├── agents/                     # All 11 agents
 │   ├── __init__.py
 │   ├── base_agent.py           # Base agent class
 │   ├── orchestrator_agent.py   # Agent 1: Coordinator
 │   ├── data_agent.py           # Agent 2: Data fetching
 │   ├── feature_agent.py        # Agent 3: Feature engineering
 │   ├── regime_agent.py         # Agent 4: Regime detection
+│   ├── volatility_regime_agent.py # Agent 4b: Volatility regime filter (Phase 5)
 │   ├── event_model_agent.py    # Agent 5: Event model training
 │   ├── backtest_agent.py       # Agent 6: Walk-forward backtest
 │   ├── decision_risk_agent.py  # Agent 7: Decision making
@@ -268,6 +272,17 @@ python validate_run.py --run runs/PLTR/<RUN_ID>
 
 When `backtest_mode: legacy_ml`, stub `risk_explain.json` and zeroed Phase 4 metrics are emitted so validation still passes.
 
+## Phase 5: Volatility Regime Filter
+
+VolatilityRegimeAgent classifies each day into QUIET / NORMAL / EXPANDING / EXTREME based on the ratio of ATR(14) to ATR(100) and the slope of ATR(14):
+
+- **EXTREME** (ratio > 1.5): blocks all new entries (forced ABSTAIN), size multiplier 0.0
+- **EXPANDING** (ratio > 1.2, slope > 0): size multiplier 0.5
+- **QUIET** (ratio < 0.8): size multiplier 0.5
+- **NORMAL**: size multiplier 1.0
+
+DecisionRiskAgent applies the multiplier and blocks ENTER during EXTREME regimes. Dashboard and final report include the latest regime, thresholds, and a per-regime trade breakdown.
+
 ## 🛡️ Safety Features
 
 ### Data Leakage Prevention
@@ -424,6 +439,6 @@ This system is for educational and research purposes. Past performance does not 
 
 ---
 
-**Version**: 0.4.1 (`v0.4.1-phase4-hardening`)
-**Last Updated**: 2026-02-20
-**Status**: Production-Ready MVP (Single-Ticker Mode, Phase 4 Risk Sizing)
+**Version**: 0.4.2 (`v0.4.2-phase5-volatility-regime`)
+**Last Updated**: 2026-02-21
+**Status**: Production-Ready MVP (Single-Ticker Mode, Phase 5 Volatility Regime Filter)

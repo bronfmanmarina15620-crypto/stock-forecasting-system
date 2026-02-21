@@ -8,6 +8,14 @@
 - Repo: add PR/issue templates, Dependabot, release workflow scaffold
 - Repo: harden `.gitignore` (`.env`, `secrets.*`)
 
+## v0.4.2-phase5-volatility-regime (2026-02-21)
+
+- New agent: `VolatilityRegimeAgent` classifies daily volatility as QUIET/NORMAL/EXPANDING/EXTREME via ATR(14)/ATR(100) ratio + slope
+- Integration: EXTREME regime blocks ENTER in `DecisionRiskAgent`; regime size multiplier attached to decision
+- Backtest: per-regime trade breakdown (`regime_breakdown.json`) with win rate, avg return, avg R-multiple
+- Dashboard: volatility regime card + regime breakdown table in HTML and JSON reports
+- Hardening: `_validate_regime_latest()` invariant check, schema guards, defensive JSON parse fallback
+
 ## v0.4.1-phase4-hardening (2026-02-20)
 
 - Docs: document Phase 4 risk sizing outputs in README (config table, artifact paths, 7 trades columns, 9 metric keys, run/validate commands)

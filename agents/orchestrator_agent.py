@@ -10,6 +10,7 @@ from .base_agent import BaseAgent
 from .data_agent import DataAgent
 from .feature_agent import FeatureAgent
 from .regime_agent import RegimeAgent
+from .volatility_regime_agent import VolatilityRegimeAgent
 from .event_model_agent import EventModelAgent
 from .backtest_agent import BacktestAgent
 from .strategy_agent import StrategyAgent
@@ -33,6 +34,7 @@ class OrchestratorAgent(BaseAgent):
             DataAgent,
             FeatureAgent,
             RegimeAgent,
+            VolatilityRegimeAgent,
             EventModelAgent,
             StrategyAgent,
             BacktestAgent,
