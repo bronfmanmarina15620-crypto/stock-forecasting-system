@@ -343,16 +343,29 @@ class DecisionRiskAgent(BaseAgent):
             self.run_dir, "VolatilityRegimeAgent", "regime_latest.json"
         )
         if not os.path.exists(vr_latest_path):
-            # Agent not present or disabled — no override
+            # Agent not present or disabled — deterministic fallback
             decision_action["volatility_regime"] = None
             decision_action["volatility_size_multiplier"] = 1.0
             return decision_action
 
-        with open(vr_latest_path, "r") as f:
-            vr_latest = json.load(f)
-
-        regime = vr_latest.get("regime", "NORMAL")
-        multiplier = float(vr_latest.get("multiplier", 1.0))
+        try:
+            with open(vr_latest_path, "r") as f:
+                vr_latest = json.load(f)
+            regime = vr_latest.get("regime", "NORMAL")
+            multiplier = float(vr_latest.get("multiplier", 1.0))
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError):
+            self.logger.warning(
+                "Phase 5: failed to parse regime_latest.json — "
+                "falling back to NORMAL/1.0"
+            )
+            decision_action["volatility_regime"] = "NORMAL"
+            decision_action["volatility_size_multiplier"] = 1.0
+            because = decision_action.get("because", [])
+            if not isinstance(because, list):
+                because = []
+            because.append("volatility_regime_missing_fallback")
+            decision_action["because"] = because
+            return decision_action
 
         # Attach volatility info to decision
         decision_action["volatility_regime"] = regime

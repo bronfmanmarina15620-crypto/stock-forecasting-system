@@ -25,6 +25,13 @@ NORMAL = "NORMAL"
 EXPANDING = "EXPANDING"
 EXTREME = "EXTREME"
 
+_VALID_REGIMES = {QUIET, NORMAL, EXPANDING, EXTREME}
+
+_REGIME_SERIES_COLUMNS = [
+    "date", "atr_short", "atr_long", "atr_ratio",
+    "atr_slope", "regime", "size_multiplier",
+]
+
 
 def classify_volatility_regime(
     atr_ratio: float,
@@ -82,6 +89,55 @@ def compute_slope(series: pd.Series, lookback: int) -> pd.Series:
         coeffs = np.polyfit(x, window, 1)
         result.iloc[i] = coeffs[0]
     return result
+
+
+def _validate_regime_latest(latest: Dict[str, Any], vr_cfg: Any) -> None:
+    """Validate invariants on the latest regime snapshot before writing.
+
+    Raises ValueError with offending values if any invariant fails.
+    """
+    regime = latest["regime"]
+    if regime not in _VALID_REGIMES:
+        raise ValueError(
+            f"Invalid regime label '{regime}'. "
+            f"Must be one of {sorted(_VALID_REGIMES)}"
+        )
+
+    expected_mult = vr_cfg.size_multipliers.get(regime.lower(), 1.0)
+    if latest["multiplier"] != expected_mult:
+        raise ValueError(
+            f"Multiplier mismatch: regime={regime} expects "
+            f"multiplier={expected_mult}, got {latest['multiplier']}"
+        )
+
+    ratio = latest.get("atr_ratio")
+    slope = latest.get("atr_slope")
+    th = latest["thresholds"]
+
+    # EXTREME iff ratio > extreme_threshold (ratio may be None during warmup)
+    if ratio is not None:
+        if regime == EXTREME and not (ratio > th["extreme"]):
+            raise ValueError(
+                f"EXTREME requires ratio > {th['extreme']}, "
+                f"got ratio={ratio}, slope={slope}"
+            )
+        if regime != EXTREME and ratio > th["extreme"]:
+            raise ValueError(
+                f"ratio={ratio} > extreme={th['extreme']} "
+                f"but regime={regime} (should be EXTREME)"
+            )
+
+    # EXPANDING implies ratio > expansion AND slope > 0 AND NOT EXTREME
+    if regime == EXPANDING:
+        if ratio is None or not (ratio > th["expansion"]):
+            raise ValueError(
+                f"EXPANDING requires ratio > {th['expansion']}, "
+                f"got ratio={ratio}"
+            )
+        if slope is None or slope <= 0:
+            raise ValueError(
+                f"EXPANDING requires slope > 0, got slope={slope}"
+            )
 
 
 class VolatilityRegimeAgent(BaseAgent):
@@ -184,6 +240,18 @@ class VolatilityRegimeAgent(BaseAgent):
         # Sort by date ascending for determinism
         regime_df = regime_df.sort_values("date").reset_index(drop=True)
 
+        # --- Schema guard: regime_series must have all required columns ---
+        missing = set(_REGIME_SERIES_COLUMNS) - set(regime_df.columns)
+        if missing:
+            raise ValueError(
+                f"regime_series missing columns: {sorted(missing)}"
+            )
+        # Coerce types for determinism
+        regime_df["regime"] = regime_df["regime"].astype(str)
+        regime_df["size_multiplier"] = regime_df["size_multiplier"].astype(
+            float
+        )
+
         # --- regime_series.parquet ---
         self.save_artifact("regime_series.parquet", regime_df)
 
@@ -211,6 +279,10 @@ class VolatilityRegimeAgent(BaseAgent):
             },
             "multiplier": float(last["size_multiplier"]),
         }
+
+        # --- Invariant check before persisting regime_latest ---
+        _validate_regime_latest(latest, vr_cfg)
+
         self.save_artifact("regime_latest.json", latest)
 
         # --- metrics.json ---

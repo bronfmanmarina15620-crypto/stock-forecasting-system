@@ -16,6 +16,7 @@ from agents.volatility_regime_agent import (
     classify_volatility_regime,
     compute_atr,
     compute_slope,
+    _validate_regime_latest,
     QUIET,
     NORMAL,
     EXPANDING,
@@ -353,3 +354,90 @@ class TestExtremeBlocksEnter:
             assert result["action"] == "ENTER"
             assert result["volatility_regime"] is None
             assert result["volatility_size_multiplier"] == 1.0
+
+
+# ---------------------------------------------------------------------------
+# 8. Hardening: invariant validation
+# ---------------------------------------------------------------------------
+
+class TestRegimeLatestInvariant:
+    """_validate_regime_latest must reject invalid regime/multiplier combos."""
+
+    def _make_latest(self, regime="NORMAL", ratio=1.0, slope=0.0, mult=1.0):
+        return {
+            "date": "2024-06-01",
+            "regime": regime,
+            "atr_ratio": ratio,
+            "atr_slope": slope,
+            "thresholds": {"quiet": 0.8, "expansion": 1.2, "extreme": 1.5},
+            "multiplier": mult,
+        }
+
+    def test_valid_normal_passes(self):
+        cfg = VolatilityRegimeConfig()
+        _validate_regime_latest(self._make_latest(), cfg)
+
+    def test_invalid_regime_label_raises(self):
+        cfg = VolatilityRegimeConfig()
+        with pytest.raises(ValueError, match="Invalid regime label"):
+            _validate_regime_latest(
+                self._make_latest(regime="UNKNOWN"), cfg
+            )
+
+    def test_multiplier_mismatch_raises(self):
+        cfg = VolatilityRegimeConfig()
+        with pytest.raises(ValueError, match="Multiplier mismatch"):
+            _validate_regime_latest(
+                self._make_latest(regime="EXTREME", ratio=1.6, mult=1.0),
+                cfg,
+            )
+
+    def test_extreme_without_high_ratio_raises(self):
+        cfg = VolatilityRegimeConfig()
+        with pytest.raises(ValueError, match="EXTREME requires"):
+            _validate_regime_latest(
+                self._make_latest(regime="EXTREME", ratio=1.0, mult=0.0),
+                cfg,
+            )
+
+
+# ---------------------------------------------------------------------------
+# 9. Hardening: DecisionRiskAgent corrupt JSON fallback
+# ---------------------------------------------------------------------------
+
+class TestDecisionRiskCorruptJsonFallback:
+    """Corrupt regime_latest.json must not crash the pipeline."""
+
+    def test_corrupt_json_falls_back_to_normal(self):
+        from agents.decision_risk_agent import DecisionRiskAgent
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            vr_dir = os.path.join(tmpdir, "VolatilityRegimeAgent")
+            os.makedirs(vr_dir)
+            # Write corrupt JSON
+            with open(os.path.join(vr_dir, "regime_latest.json"), "w") as f:
+                f.write("{broken json")
+
+            decision_action = {
+                "action": "ENTER",
+                "position": 1,
+                "because": ["Entry: breakout"],
+                "date": "2024-06-01",
+            }
+
+            config = get_default_config("PLTR")
+            agent = DecisionRiskAgent.__new__(DecisionRiskAgent)
+            agent.config = config
+            agent.run_dir = tmpdir
+            from utils import AgentLogger
+            agent.logger = AgentLogger("DecisionRiskAgent", tmpdir)
+            agent.agent_name = "DecisionRiskAgent"
+            agent.agent_dir = os.path.join(tmpdir, "DecisionRiskAgent")
+            os.makedirs(agent.agent_dir, exist_ok=True)
+
+            result = agent._apply_volatility_regime(decision_action)
+
+            assert result["action"] == "ENTER"
+            assert result["volatility_regime"] == "NORMAL"
+            assert result["volatility_size_multiplier"] == 1.0
+            assert "volatility_regime_missing_fallback" in result["because"]
