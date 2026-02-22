@@ -48,3 +48,28 @@ CI/Nightly: Telegram notifications include edge status (PASS/FAIL, N, E, PF, MDD
 * All `content_hash_sha256` integrity checks pass.
 * `validate_run.py` is the authoritative gate for required artifacts. Extra artifacts may appear in the run directory; do not treat them as failures unless `validate_run.py` fails.
 * Some validations are conditional (e.g., DriftAgent, ShadowMonitorAgent) and are only required when the corresponding agent folder exists for that run mode.
+
+---
+
+## Approved Commands
+
+These commands are supported and exist in the repository:
+
+| Command | Purpose |
+|---------|---------|
+| `python run.py --ticker <TICKER>` | Run the pipeline (standard mode) |
+| `python run.py --ticker <TICKER> --mode shadow` | Run the pipeline (shadow/monitoring mode) |
+| `python validate_run.py --run <RUN_PATH>` | Validate a completed run |
+| `python tools/edge_validate.py --run <RUN_PATH>` | Standalone edge gate validation |
+| `python -m pytest tests/ -q` | Run unit tests |
+| `bash scripts/determinism_check.sh [TICKER]` | Determinism verification (two back-to-back runs) |
+| `bash scripts/smoke_test_10_runs.sh` | 10-run stability gate |
+| `bash scripts/daily_run.sh` | Daily pipeline + validation |
+
+GitHub Actions workflows: `nightly_pltr.yml` (standard), `nightly_pltr_shadow.yml` (shadow mode).
+
+## Optional Tooling (present in repo)
+
+| Tool | Purpose |
+|------|---------|
+| `scripts/determinism_compare_runs.sh` | Compare two existing runs for determinism |

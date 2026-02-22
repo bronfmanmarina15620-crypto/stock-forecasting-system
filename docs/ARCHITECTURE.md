@@ -20,26 +20,15 @@ Default action is always ABSTAIN.
 
 ## Pipeline Stages
 
+**Authoritative pipeline**: see `agents/orchestrator_agent.py`. Mode-dependent pipeline (e.g., shadow vs normal) uses conditional insertion defined in the orchestrator.
+
+The high-level flow is:
+
 ```
-Data -> Features -> Regime -> EventModel -> Backtest -> Decision/Risk -> Drift -> Portfolio -> [ShadowMonitor] -> Dashboard -> Memory
+Data -> Features -> Regime -> VolatilityRegime -> EventModel -> Strategy -> Backtest -> Robustness -> Decision/Risk -> [Drift] -> Portfolio -> [ShadowMonitor] -> Dashboard -> Memory
 ```
 
-| # | Stage           | Agent                | Purpose                                    |
-|---|-----------------|----------------------|--------------------------------------------|
-| 1 | Data            | `DataAgent`          | Fetch OHLCV from Yahoo (primary), Stooq (backup) |
-| 2 | Features        | `FeatureAgent`       | Generate as-of features (returns, vol, ATR, MA) |
-| 3 | Regime          | `RegimeAgent`        | Label market regime (TREND/RANGE x LOW/HIGH VOL) |
-| 4 | Event Model     | `EventModelAgent`    | Train logistic model for 5-day +2% event   |
-| 5 | Backtest        | `BacktestAgent`      | Walk-forward OOS evaluation with costs      |
-| 6 | Decision/Risk   | `DecisionRiskAgent`  | ENTER/ABSTAIN logic + P&L + abstain stats   |
-| 7 | Portfolio       | `PortfolioAgent`     | Position sizing (PASSIVE mode, no execution)|
-| 7b| Shadow Monitor  | `ShadowMonitorAgent` | Drift metrics + monitoring (shadow mode only, Phase 7) |
-| 7c| Drift Analysis  | `DriftAgent`         | Cross-run drift z-scores from shadow history (Phase 8) |
-| 8 | Dashboard       | `DashboardAgent`     | Generate final_report.html + final_report.json |
-| 9 | Memory          | `MemoryLearningAgent`| Store run metrics, generate suggestions     |
-
-The `OrchestratorAgent` coordinates execution. No agent calls another directly.
-In shadow mode (`--mode shadow`), `ShadowMonitorAgent` is inserted before `DashboardAgent`.
+The `OrchestratorAgent` coordinates execution. No agent calls another directly. Agent ordering and mode-dependent insertion (e.g., ShadowMonitorAgent in shadow mode) are implemented in the orchestrator; docs should not hard-code counts or exact ordering.
 
 ---
 
@@ -91,70 +80,26 @@ In shadow mode (`--mode shadow`), `ShadowMonitorAgent` is inserted before `Dashb
 
 ## Run Directory Structure
 
-Every run produces:
+Every run produces a folder under `runs/<TICKER>/<RUN_ID>/` with per-agent subdirectories.
 
-```
-runs/PLTR/<RUN_ID>/
-  config_snapshot.yaml         # Frozen config for this run
-  config.json                  # Frozen config (JSON format)
-  status.json                  # Per-stage pass/fail with timestamps
-  status.txt                   # Human-readable status (legacy)
-  final_report.html            # Dashboard HTML
-  final_report.json            # Machine-readable report
-  DataAgent/
-    output.json                # Agent output metadata
-    agent.log                  # Agent log
-    bars_raw.parquet           # Raw OHLCV
-    bars_adj.parquet           # Adjusted OHLCV
-    quality_report.json        # Data quality checks
-  FeatureAgent/
-    output.json
-    features_v1.parquet        # Generated features
-    feature_manifest.json      # Feature descriptions + stats
-  RegimeAgent/
-    output.json
-    regime_series.parquet      # Regime label per date
-    regime_definition.json     # Regime definitions + counts
-  EventModelAgent/
-    output.json
-    event_model.pkl            # Trained model
-    calibration.json           # Calibration stats
-    model_card.md              # Model documentation
-  BacktestAgent/
-    output.json
-    predictions_oos.parquet    # OOS predictions
-    trades.parquet             # Trade records
-    pnl_series.parquet         # Cumulative P&L
-    metrics.json               # Performance metrics
-    sanity_tests.json          # Leakage detection results
-    costs_assumptions.json     # Trading cost details
-    backtest_report.html       # Backtest visual report
-  DecisionRiskAgent/
-    output.json
-    signals.csv                # All signals with actions
-    decision_action.json       # Current decision (latest)
-    decision_explain.json      # Decision statistics
-    strategy_pnl.parquet       # Strategy P&L series
-    abstain_stats.json         # Abstain/Enter ratios
-  PortfolioAgent/
-    output.json
-    portfolio_plan.json        # Allocation plan
-    portfolio_report.html      # Portfolio visual report
-    risk_summary.json          # Risk metrics
-  DriftAgent/
-    output.json                # Agent output metadata
-    drift_summary.json         # Z-scores, drift flag, coverage counts, debug samples, drift_reason_summary
-    drift_timeseries.parquet   # Per-run history with z-scores
-    status.txt                 # One-line status summary
-  DashboardAgent/
-    output.json                # Agent output metadata
-  MemoryLearningAgent/
-    output.json
-    lessons_learned.md         # Run insights
-    suggestions.json           # Improvement suggestions
-  OrchestratorAgent/
-    output.json                # Orchestrator summary
-```
+### Contractual artifacts (required for validity)
+
+Enforced by `validate_run.py` `REQUIRED_ARTIFACTS`. Missing contractual artifacts cause validation failure.
+
+| Scope | Examples |
+|-------|---------|
+| Root-level | `status.txt`, `status.json`, `config.json`, `config_snapshot.yaml`, `final_report.html`, `final_report.json` |
+| BacktestAgent | `trades.parquet`, `pnl_series.parquet`, `metrics.json`, `costs_assumptions.json`, `risk_explain.json` |
+| DecisionRiskAgent | `signals.csv`, `abstain_stats.json`, `decision_action.json`, `decision_explain.json` |
+| RobustnessAgent | `summary.json`, `monte_carlo.json` |
+| ShadowMonitorAgent (shadow mode) | `shadow_metrics.json`, `shadow_summary.json` (validated only when folder exists) |
+| DriftAgent (when present) | `drift_summary.json` (validated only when folder exists) |
+
+> **Authoritative list**: `validate_run.py` `REQUIRED_ARTIFACTS`, `SHADOW_ARTIFACTS`, and `DRIFT_ARTIFACTS` dicts.
+
+### Optional / debug artifacts
+
+Each agent may emit additional files (logs, HTML reports, parquet analysis files, model artifacts) for debugging and analysis. These are not enforced by validation and may change between releases. See each agent's implementation for the current set.
 
 ---
 

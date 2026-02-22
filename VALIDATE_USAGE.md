@@ -23,15 +23,16 @@ python validate_run.py --run $RUN_PATH
 ## What It Checks
 
 ### 1. Required Artifacts
-Ensures all required files exist:
+Ensures all required files exist as defined by `REQUIRED_ARTIFACTS` in `validate_run.py` (authoritative source). Mode-dependent artifacts (`ShadowMonitorAgent`, `DriftAgent`) are validated only when the corresponding folder exists.
+
+> **Note**: The artifact list below is a snapshot for quick reference. If it diverges from `validate_run.py`, the code is authoritative.
 
 **BacktestAgent:**
-- predictions_oos.parquet
-- sanity_tests.json
 - trades.parquet
 - pnl_series.parquet
 - metrics.json
 - costs_assumptions.json
+- risk_explain.json
 
 **DecisionRiskAgent:**
 - signals.csv
@@ -39,12 +40,17 @@ Ensures all required files exist:
 - decision_action.json
 - decision_explain.json
 
-**DashboardAgent:**
-- final_report.html
-- final_report.json
+**RobustnessAgent:**
+- summary.json
+- monte_carlo.json
 
 **Root:**
 - status.txt
+- status.json
+- config.json
+- config_snapshot.yaml
+- final_report.html
+- final_report.json
 
 ### 2. Sanity Tests
 Validates that sanity tests passed:
@@ -56,20 +62,10 @@ Validates that sanity tests passed:
   - Model shouldn't work with future data
 
 ### 3. Metrics
-Checks that metrics.json contains:
-
-- EV_per_trade
-- max_drawdown
-- win_rate
-- avg_trades_per_month
+Checks that metrics.json contains required fields as defined by `REQUIRED_METRICS_FIELDS` in `validate_run.py` (authoritative source).
 
 ### 4. Abstain Statistics
-Checks that abstain_stats.json contains:
-
-- abstain_ratio
-- enter_count
-- abstain_count
-- signals_per_month
+Checks that abstain_stats.json contains required fields as defined by `REQUIRED_ABSTAIN_FIELDS` in `validate_run.py` (authoritative source).
 
 ### 5. OOS Sample Size
 Warns if predictions_oos.parquet has < 250 rows
