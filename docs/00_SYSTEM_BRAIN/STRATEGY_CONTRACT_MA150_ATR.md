@@ -18,7 +18,7 @@
 
 * Trend filter: close > MA150 AND MA150 slope > 0.
 * RANGE_HIGH_VOL block: weak trend + high ATR/close ratio blocks entry.
-* Entry: 20-day breakout when regime_ok (as implemented in `strategy/ma150_atr.py`).
+* Entry: breakout (per `entry_lookback`) when regime_ok (as implemented in `strategy/ma150_atr.py`).
 * Exit: ATR trailing stop (highest close since entry minus atr_mult * ATR).
 * Position: 0/1 (long-only, no shorting).
 * All logic must be deterministic; no randomness.

@@ -61,7 +61,7 @@ Pipeline order is defined in `agents/orchestrator_agent.py`.
 
 * Role: final decision normalization (ENTER/ABSTAIN/EXIT/UNKNOWN) and risk sizing (as implemented).
 * Inputs: strategy + regime + robustness + backtest metrics.
-* Outputs: `decision_action.json`, `decision_explain.json`, `signals.csv`, `abstain_stats.json`.
+* Outputs: `decision_action.json`, `decision_explain.json`, `signals.csv`, `abstain_stats.json`, `strategy_pnl.parquet`.
 
 ## DriftAgent
 

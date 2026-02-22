@@ -40,3 +40,5 @@ These are non-negotiable. Any change that violates these requires an explicit PR
   1. update this file
   2. update relevant contract docs
   3. include validation steps and acceptance criteria
+
+* Documentation must not hard-code implementation details that are likely to evolve (agent counts, artifact lists, parameter values) unless they are contractual. Reference source files (e.g., `agents/orchestrator_agent.py`, `config/strategy.yaml`) as the source of truth.
