@@ -16,10 +16,10 @@
 
 ## Edge Validation
 
-Edge validation is a **hard gate** — a run cannot be SUCCESS if edge fails.
+Edge validation is a **hard gate at run time** — a run cannot be SUCCESS if edge fails.
 
 1. **run.py** runs edge validation *before* writing final status. If edge fails, `status.txt` = FAILED and the program exits non-zero.
-2. **validate_run.py** edge gates step checks edge gates and propagates the edge exit code.
+2. **validate_run.py** STEP 10 checks edge gates. Pass `--skip-edge` to skip this step (used by determinism CI and smoke runs to isolate structural checks from edge gating).
 
 Exit code semantics (consistent across `run.py`, `validate_run.py`, `tools/edge_validate.py`):
 * **0** = edge PASS — all gates satisfied, no kill-switch.
@@ -59,7 +59,8 @@ These commands are supported and exist in the repository:
 |---------|---------|----------------|
 | `python run.py --ticker <TICKER>` | Run the pipeline (standard mode) | Exit 0; artifacts in `runs/<TICKER>/<RUN_ID>/` |
 | `python run.py --ticker <TICKER> --mode shadow` | Run the pipeline (shadow/monitoring mode) | Exit 0; artifacts in `runs/<TICKER>/<RUN_ID>/` |
-| `python validate_run.py --run <RUN_PATH>` | Validate a completed run | Exit 0 = PASS, 1 = FAIL, 2 = edge artifacts missing |
+| `python validate_run.py --run <RUN_PATH>` | Validate a completed run (full, including edge) | Exit 0 = PASS, 1 = FAIL |
+| `python validate_run.py --run <RUN_PATH> --skip-edge` | Structural validation only (no edge gates) | Exit 0 = PASS, 1 = FAIL |
 | `python tools/edge_validate.py --run <RUN_PATH>` | Standalone edge gate validation | Exit 0 = PASS, 1 = FAIL, 2 = missing artifacts |
 | `python -m pytest tests/ -q` | Run unit tests | Exit 0; summary line shows all passed |
 | `bash scripts/determinism_check.sh [TICKER]` | Determinism verification (two back-to-back runs) | Exit 0 = DETERMINISM PASS |

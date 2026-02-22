@@ -18,7 +18,8 @@ These are non-negotiable. Any change that violates these requires an explicit PR
 * **Replay parity gate**: `tools/compare_runs.py` compares canonical JSON hashes and snapshot hashes between two runs. Exit code 0 = parity PASS, 1 = FAIL. `final_report.html` is excluded from parity comparison (contains generation timestamps); deterministic content is verified via `final_report.json`.
 * **Determinism check**: `bash scripts/determinism_check.sh [TICKER] [AS_OF_DATE]` runs live + replay and verifies parity end-to-end. Configurable via `PYTHON` env var.
 * **CI smoke test**: `determinism.yml` includes a `determinism-smoke` job (manual dispatch only) that runs a pinned-date determinism check.
-* **Nightly replay parity**: The nightly workflow runs a live run, then a replay from its snapshot, and compares both for parity. Parity failure triggers Telegram notification.
+* **Nightly replay parity**: The nightly workflow runs a live run, then a replay from its snapshot, and compares both for parity. Replay validation uses `--skip-edge` (structural only). Parity failure triggers Telegram notification.
+* **Determinism CI isolation**: `determinism_check.sh` and CI smoke runs use `validate_run.py --skip-edge` so that determinism verification fails ONLY on reproducibility/parity/schema/hash issues — never on edge gate results. Edge gating is enforced separately at run time (`run.py`) and in nightly primary validation.
 
 ## Strategy Scope
 
@@ -57,7 +58,8 @@ These are non-negotiable. Any change that violates these requires an explicit PR
 * Thresholds are defined in `config/edge.yaml` (runtime source of truth) and documented in `EDGE_DEFINITION.md`.
 * Missing or invalid artifacts must cause validation failure (exit code 2), never silent fallback.
 * Kill-switch conditions (rolling edge breakdown, drawdown shock) force ABSTAIN until explicit reset criteria are met.
-* **Hard failure enforcement:** edge exit_code 1 (gates fail) or 2 (missing/invalid artifacts) must prevent run status SUCCESS. `run.py` runs edge validation before writing the final status; failure marks the run FAILED with a non-zero program exit code. No fallback path can produce SUCCESS when edge_exit_code != 0.
+* **Hard failure enforcement at run time:** edge exit_code 1 (gates fail) or 2 (missing/invalid artifacts) must prevent run status SUCCESS. `run.py` runs edge validation before writing the final status; failure marks the run FAILED with a non-zero program exit code. No fallback path can produce SUCCESS when edge_exit_code != 0.
+* **Decoupled from determinism CI:** Determinism verification (`determinism_check.sh`, CI smoke runs) uses `validate_run.py --skip-edge` so that reproducibility checks are independent of edge/performance gating. Edge is enforced at run time (`run.py`) and in the nightly primary validation step (without `--skip-edge`).
 * **Exit code semantics:** 0 = edge PASS, 1 = edge computed but gates FAIL, 2 = missing/invalid artifacts.
 
 ## Change Control

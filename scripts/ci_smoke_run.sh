@@ -6,15 +6,14 @@
 #
 # Runs a single-ticker pipeline with a reduced data window (~350 trading
 # bars via --lookback-days 500) in signals_only mode, then validates the
-# resulting run directory with validate_run.py.
+# resulting run directory with validate_run.py --skip-edge (structural only).
 #
-# Edge gate failure (exit 1) is tolerated because edge gates depend on
-# live market data, not code quality. Real errors (exit > 1) still fail CI.
+# Edge gates are skipped because they depend on live market data, not code
+# quality. Structural validation (artifacts, schema, hashes) must pass.
 #
 # Exit codes:
-#   0 = pipeline + structural validation passed (edge gates may have failed)
+#   0 = pipeline + structural validation passed
 #   1 = pipeline crash or structural validation failure
-#   >1 = propagated from run.py or validate_run.py
 
 set -uo pipefail
 
@@ -29,8 +28,8 @@ echo ""
 # 500 calendar days ≈ 350 trading bars — enough for MA150 warmup +
 # a meaningful backtest window, while keeping runtime under ~3 min.
 #
-# Edge gate failure (exit 1) is acceptable in CI — gates depend on
-# live market data which varies. Exit > 1 = real error (crash, missing deps).
+# Edge gate failure (exit 1) from run.py is acceptable in CI — gates
+# depend on live market data. Exit > 1 = real error (crash, missing deps).
 run_exit=0
 python run.py --ticker "$TICKER" --lookback-days 500 --min-bars 200 2>&1 | tee /tmp/run.log || run_exit=$?
 
@@ -59,20 +58,10 @@ echo ""
 echo "CI_SMOKE_RUN_ID=$RUN_ID"
 echo ""
 
-# Validate the run artifacts and schema.
-# Exit 1 from validate_run.py may include edge gate failure — tolerate it.
-# Exit 2 = missing/invalid edge artifacts — also tolerate (not a code defect).
-val_exit=0
-python validate_run.py --run "runs/$TICKER/$RUN_ID" || val_exit=$?
+# Validate structural integrity only (--skip-edge).
+# Edge gates are not a CI concern — they are enforced at run time
+# and in nightly validation.
+python validate_run.py --run "runs/$TICKER/$RUN_ID" --skip-edge
 
-if [[ $val_exit -eq 0 ]]; then
-  echo ""
-  echo "CI SMOKE RUN: PASS"
-elif [[ $val_exit -le 2 ]]; then
-  echo ""
-  echo "CI SMOKE RUN: PASS (structural) — edge validation exit $val_exit"
-else
-  echo ""
-  echo "CI SMOKE RUN: FAIL — validate_run.py exit $val_exit"
-  exit $val_exit
-fi
+echo ""
+echo "CI SMOKE RUN: PASS"

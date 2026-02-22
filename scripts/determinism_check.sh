@@ -114,8 +114,8 @@ log "Run A completed: $RUN1_ID"
 
 # ── Validate run A ──────────────────────────────────────────
 
-log "Validating run A ..."
-if ! $PYTHON "$ROOT_DIR/validate_run.py" --run "$RUN1_DIR"; then
+log "Validating run A (structural, --skip-edge) ..."
+if ! $PYTHON "$ROOT_DIR/validate_run.py" --run "$RUN1_DIR" --skip-edge; then
   fail "Validation failed for run A ($RUN1_DIR)"
   exit 1
 fi
@@ -140,8 +140,8 @@ log ""
 
 # ── Validate run B ──────────────────────────────────────────
 
-log "Validating run B ..."
-if ! $PYTHON "$ROOT_DIR/validate_run.py" --run "$RUN2_DIR"; then
+log "Validating run B (structural, --skip-edge) ..."
+if ! $PYTHON "$ROOT_DIR/validate_run.py" --run "$RUN2_DIR" --skip-edge; then
   fail "Validation failed for run B ($RUN2_DIR)"
   exit 1
 fi
