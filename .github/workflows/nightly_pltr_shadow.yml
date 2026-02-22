@@ -4,7 +4,8 @@ on:
   schedule:
     # 21:00 UTC = 23:00 Israel (Asia/Jerusalem, IST = UTC+2 winter).
     # During DST (IDT = UTC+3, ~late Mar-late Oct) this fires at 00:00 local.
-    - cron: "0 21 * * *"
+    # Stock-only (daily bars): no new data on Sat/Sun, skip weekend runs.
+    - cron: "0 21 * * 1-5"
   workflow_dispatch: {}
 
 jobs:

@@ -1,0 +1,35 @@
+name: Daily Health Check
+
+on:
+  schedule:
+    # Runs daily (including weekends) to catch infra/runtime breakage early.
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PYTHONHASHSEED: "0"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Import smoke test
+        run: python -c "from strategy.ma150_atr import compute_ma150_atr_strategy; print('IMPORT_OK')"
+
+      - name: Run unit tests (fast subset)
+        run: python -m pytest tests/test_ma150_atr_strategy.py -q

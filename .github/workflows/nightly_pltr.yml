@@ -2,7 +2,8 @@ name: Nightly PLTR Run
 
 on:
   schedule:
-    - cron: '0 21 * * *'
+    # Stock-only (daily bars): no new data on Sat/Sun, skip weekend runs.
+    - cron: '0 21 * * 1-5'
   workflow_dispatch:
 
 jobs:
