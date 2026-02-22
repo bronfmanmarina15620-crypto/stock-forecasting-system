@@ -8,6 +8,7 @@ Usage:
 """
 
 import argparse
+import hashlib
 import subprocess
 import sys
 import os
@@ -145,6 +146,62 @@ def _persist_summary(summary: dict, run_dir: str):
             f.write(f"ERROR: {summary['error']}\n")
 
 
+def _edge_config_info() -> dict:
+    """Return config path, loaded flag, and SHA-256 hash of config/edge.yaml."""
+    config_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "config", "edge.yaml",
+    )
+    info = {
+        "edge_config_path": "config/edge.yaml",
+        "edge_config_loaded": False,
+        "edge_config_hash_sha256": None,
+    }
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "rb") as f:
+                info["edge_config_hash_sha256"] = hashlib.sha256(
+                    f.read()
+                ).hexdigest()
+            info["edge_config_loaded"] = True
+        except Exception:
+            pass
+    return info
+
+
+def _classify_edge_failure(exit_code: int, error: str = None) -> str:
+    """Deterministic failure_class from exit_code + error message.
+
+    Mapping:
+        exit_code 0 → "NONE"
+        exit_code 1 → "EDGE_GATES_FAIL"
+        exit_code 2 → classified by error string:
+            missing config     → "MISSING_CONFIG"
+            missing artifact   → "MISSING_ARTIFACTS"
+            parse/schema error → "INVALID_ARTIFACTS"
+            anything else      → "EXCEPTION"
+    """
+    if exit_code == 0:
+        return "NONE"
+    if exit_code == 1:
+        return "EDGE_GATES_FAIL"
+    # exit_code == 2 — classify from error
+    if not error:
+        return "EXCEPTION"
+    err_lower = error.lower()
+    if "config" in err_lower:
+        return "MISSING_CONFIG"
+    if "missing" in err_lower and "artifact" in err_lower:
+        return "MISSING_ARTIFACTS"
+    if "invalid" in err_lower or "parse" in err_lower or "schema" in err_lower:
+        return "INVALID_ARTIFACTS"
+    if "import" in err_lower:
+        return "EXCEPTION"
+    # Fallback: distinguish missing vs invalid from the raw message
+    if "missing" in err_lower:
+        return "MISSING_ARTIFACTS"
+    return "EXCEPTION"
+
+
 def _run_edge_validation(run_dir: str):
     """Run edge validation and persist report + summary JSON.
 
@@ -165,22 +222,22 @@ def _run_edge_validation(run_dir: str):
             print_report,
         )
     except ImportError as e:
-        _write_edge_summary(run_dir, edge_pass=False, exit_code=2,
-                            error=f"import error: {e}")
+        err = f"import error: {e}"
+        _write_edge_summary(run_dir, edge_pass=False, exit_code=2, error=err)
         return False
 
     try:
         thresholds = load_edge_config()
     except SystemExit:
-        _write_edge_summary(run_dir, edge_pass=False, exit_code=2,
-                            error="missing or invalid config/edge.yaml")
+        err = "missing or invalid config/edge.yaml"
+        _write_edge_summary(run_dir, edge_pass=False, exit_code=2, error=err)
         return False
 
     try:
         artifacts = load_artifacts(run_dir)
-    except SystemExit as exc:
-        _write_edge_summary(run_dir, edge_pass=False, exit_code=2,
-                            error="missing or invalid artifacts")
+    except SystemExit:
+        err = "missing or invalid artifacts"
+        _write_edge_summary(run_dir, edge_pass=False, exit_code=2, error=err)
         return False
 
     metrics = compute_edge_metrics(
@@ -211,10 +268,15 @@ def _run_edge_validation(run_dir: str):
     with open(os.path.join(run_dir, "edge_report.txt"), "w") as f:
         f.write(report_text)
 
+    # Build failure_class + config info
+    failure_class = _classify_edge_failure(exit_code)
+    config_info = _edge_config_info()
+
     # Write edge_summary.json
     summary = {
         "edge_pass": edge_pass,
         "exit_code": exit_code,
+        "failure_class": failure_class,
         "N": metrics["n"],
         "expectancy": metrics["e_r"],
         "pf": metrics["pf"],
@@ -231,6 +293,7 @@ def _run_edge_validation(run_dir: str):
         },
         "regime_table": metrics.get("regime_table", []),
     }
+    summary.update(config_info)
     with open(os.path.join(run_dir, "edge_summary.json"), "w") as f:
         json.dump(summary, f, indent=2)
 
@@ -240,9 +303,12 @@ def _run_edge_validation(run_dir: str):
 def _write_edge_summary(run_dir: str, edge_pass: bool, exit_code: int,
                         error: str = None):
     """Write a minimal edge_summary.json on error."""
+    failure_class = _classify_edge_failure(exit_code, error)
+    config_info = _edge_config_info()
     summary = {
         "edge_pass": edge_pass,
         "exit_code": exit_code,
+        "failure_class": failure_class,
         "N": 0,
         "expectancy": 0.0,
         "pf": 0.0,
@@ -256,9 +322,11 @@ def _write_edge_summary(run_dir: str, edge_pass: bool, exit_code: int,
         "regime_table": [],
         "error": error,
     }
+    summary.update(config_info)
     with open(os.path.join(run_dir, "edge_summary.json"), "w") as f:
         json.dump(summary, f, indent=2)
     with open(os.path.join(run_dir, "edge_report.txt"), "w") as f:
+        f.write(f"VERDICT: {failure_class}\n")
         f.write(f"EDGE: MISSING — {error}\n")
 
 

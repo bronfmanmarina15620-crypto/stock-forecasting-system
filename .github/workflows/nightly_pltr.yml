@@ -65,6 +65,8 @@ jobs:
           print('edge_e=' + str(round(e.get('expectancy', 0.0), 4)))
           print('edge_pf=' + str(round(e.get('pf', 0.0), 4)))
           print('edge_mdd=' + str(round(e.get('mdd_r', 0.0), 4)))
+          print('failure_class=' + str(e.get('failure_class', 'UNKNOWN')))
+          print('edge_config_loaded=' + str(e.get('edge_config_loaded', False)).lower())
           " >> $GITHUB_OUTPUT
           else
             echo "edge_pass=na" >> $GITHUB_OUTPUT
@@ -72,6 +74,8 @@ jobs:
             echo "edge_e=0" >> $GITHUB_OUTPUT
             echo "edge_pf=0" >> $GITHUB_OUTPUT
             echo "edge_mdd=0" >> $GITHUB_OUTPUT
+            echo "failure_class=UNKNOWN" >> $GITHUB_OUTPUT
+            echo "edge_config_loaded=false" >> $GITHUB_OUTPUT
           fi
           echo "Latest run dir: $LATEST_DIR"
 
@@ -121,7 +125,7 @@ jobs:
           EDGE_E="${{ steps.latest.outputs.edge_e }}"
           EDGE_PF="${{ steps.latest.outputs.edge_pf }}"
           EDGE_MDD="${{ steps.latest.outputs.edge_mdd }}"
-          TEXT=$'✅ Nightly run SUCCESS\nTicker: PLTR\nRUN_ID: '"${RUN_ID}"$'\nCommit: '"${SHORT_SHA}"$'\nDecision: '"${DECISION}"$'\nHasTrade: '"${HAS_TRADE}"$'\nEdge: '"${EDGE_PASS}"' N='"${EDGE_N}"' E='"${EDGE_E}"' PF='"${EDGE_PF}"' MDD_R='"${EDGE_MDD}"$'\nActions: '"${RUN_URL}"
+          TEXT=$'✅ Nightly run SUCCESS\nTicker: PLTR\nRUN_ID: '"${RUN_ID}"$'\nCommit: '"${SHORT_SHA}"$'\nDecision: '"${DECISION}"$'\nHasTrade: '"${HAS_TRADE}"$'\nEdge: PASS N='"${EDGE_N}"' E='"${EDGE_E}"' PF='"${EDGE_PF}"' MDD_R='"${EDGE_MDD}"$'\nActions: '"${RUN_URL}"
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
             --data-urlencode "text=${TEXT}" || true
@@ -134,7 +138,21 @@ jobs:
         run: |
           RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           END_TIME=$(date '+%d/%m/%Y %H:%M UTC')
-          TEXT="PLTR nightly run FAILED"$'\n'"Start: ${START_TIME}"$'\n'"End:   ${END_TIME}"$'\n'"${RUN_URL}"
+          FAILURE_CLASS="${{ steps.latest.outputs.failure_class }}"
+          FAILURE_CLASS="${FAILURE_CLASS:-UNKNOWN}"
+          EDGE_N="${{ steps.latest.outputs.edge_n }}"
+          EDGE_E="${{ steps.latest.outputs.edge_e }}"
+          EDGE_PF="${{ steps.latest.outputs.edge_pf }}"
+          EDGE_MDD="${{ steps.latest.outputs.edge_mdd }}"
+          EDGE_EXIT="${{ steps.latest.outputs.edge_pass }}"
+          # Build fix hint based on failure_class
+          FIX_HINT=""
+          if [ "$FAILURE_CLASS" = "MISSING_CONFIG" ]; then
+            FIX_HINT=$'\nFix: ensure config/edge.yaml exists on main (not ignored) and is packaged in the repo.'
+          elif [ "$FAILURE_CLASS" = "MISSING_ARTIFACTS" ]; then
+            FIX_HINT=$'\nFix: validate_run step before edge must produce trades.parquet + robustness artifacts.'
+          fi
+          TEXT="PLTR nightly run FAILED"$'\n'"Start: ${START_TIME}"$'\n'"End:   ${END_TIME}"$'\n'"Edge: ${FAILURE_CLASS} exit=${EDGE_EXIT} N=${EDGE_N} E=${EDGE_E} PF=${EDGE_PF} MDD_R=${EDGE_MDD}${FIX_HINT}"$'\n'"${RUN_URL}"
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
             --data-urlencode "text=${TEXT}" || true

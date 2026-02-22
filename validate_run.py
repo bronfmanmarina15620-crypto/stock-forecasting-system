@@ -779,6 +779,19 @@ def validate_edge_gates(run_path: Path) -> Tuple[List[str], List[str], int]:
             f"mean_ret={row['mean_return']:+.6f}{flag}"
         )
 
+    # Classify failure for operator diagnostics
+    if edge_exit_code == 0:
+        edge_class = "NONE"
+    elif edge_exit_code == 1:
+        edge_class = "EDGE_GATES_FAIL"
+    else:
+        # exit_code 2: distinguish config vs artifact issues from fail_reasons
+        if any("config" in f.lower() for f in fail_reasons):
+            edge_class = "MISSING_CONFIG"
+        else:
+            edge_class = "MISSING_ARTIFACTS"
+    print(f"  EDGE_CLASS: {edge_class}")
+
     if status == "FAIL":
         fail_reasons.append(summary_line)
 

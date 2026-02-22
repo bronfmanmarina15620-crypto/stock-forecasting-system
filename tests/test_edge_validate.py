@@ -7,8 +7,12 @@ Covers:
 - Gate pass/fail for each metric
 - Kill-switch triggers
 - Regime NO-TRADE identification
+- failure_class classification (NONE, EDGE_GATES_FAIL, MISSING_CONFIG, etc.)
+- edge_config_hash_sha256 presence
+- VERDICT header in report output
 """
 
+import hashlib
 import json
 import os
 import sys
@@ -25,6 +29,7 @@ from tools.edge_validate import (
     _DEFAULT_THRESHOLDS,
     check_gates,
     check_kill_switch,
+    classify_verdict,
     compute_edge_metrics,
     load_artifacts,
     load_edge_config,
@@ -980,3 +985,205 @@ class TestEdgeHardFailure:
         with open(os.path.join(run_dir, "status.txt")) as f:
             status_text = f.read()
         assert "SUCCESS" in status_text
+
+
+# ============================================================
+# TestClassifyVerdict
+# ============================================================
+
+
+class TestClassifyVerdict:
+    """classify_verdict() returns correct token from gates + kill_switch."""
+
+    def test_all_pass_no_kill(self):
+        gates = {"g1": {"passed": True}, "g2": {"passed": True}}
+        ks = {"triggered": False, "reasons": []}
+        assert classify_verdict(gates, ks) == "PASS"
+
+    def test_gate_fail(self):
+        gates = {"g1": {"passed": True}, "g2": {"passed": False}}
+        ks = {"triggered": False, "reasons": []}
+        assert classify_verdict(gates, ks) == "FAIL_GATES"
+
+    def test_kill_switch_triggered(self):
+        gates = {"g1": {"passed": True}}
+        ks = {"triggered": True, "reasons": ["dd_shock"]}
+        assert classify_verdict(gates, ks) == "FAIL_GATES"
+
+
+# ============================================================
+# TestFailureClassification
+# ============================================================
+
+
+class TestFailureClassification:
+    """failure_class in edge_summary.json must be correct per scenario."""
+
+    def test_pass_failure_class_none(self, tmp_path):
+        """edge pass → failure_class == 'NONE'."""
+        from run import _run_edge_validation
+
+        r_vals = [0.5] * 40
+        trades = _make_trades(r_values=r_vals)
+        wf = _make_walk_forward(
+            expectancies=[0.01, 0.02, 0.015, 0.008, 0.005, 0.01],
+        )
+        run_dir = _setup_run_dir(tmp_path, trades_df=trades, walk_forward=wf)
+        _run_edge_validation(run_dir)
+
+        with open(os.path.join(run_dir, "edge_summary.json")) as f:
+            summary = json.load(f)
+        assert summary["failure_class"] == "NONE"
+
+    def test_gate_fail_failure_class(self, tmp_path):
+        """gate fail → failure_class == 'EDGE_GATES_FAIL'."""
+        from run import _run_edge_validation
+
+        r_vals = [-1.0] * 40
+        trades = _make_trades(r_values=r_vals)
+        wf = _make_walk_forward(expectancies=[-0.01] * 6)
+        run_dir = _setup_run_dir(tmp_path, trades_df=trades, walk_forward=wf)
+        _run_edge_validation(run_dir)
+
+        with open(os.path.join(run_dir, "edge_summary.json")) as f:
+            summary = json.load(f)
+        assert summary["failure_class"] == "EDGE_GATES_FAIL"
+
+    def test_missing_artifacts_failure_class(self, tmp_path):
+        """missing trades.parquet → failure_class == 'MISSING_ARTIFACTS'."""
+        from run import _run_edge_validation
+
+        run_dir = _setup_run_dir(tmp_path, skip_artifact="trades")
+        _run_edge_validation(run_dir)
+
+        with open(os.path.join(run_dir, "edge_summary.json")) as f:
+            summary = json.load(f)
+        assert summary["failure_class"] == "MISSING_ARTIFACTS"
+
+    def test_missing_config_failure_class(self, tmp_path, monkeypatch):
+        """missing config/edge.yaml → failure_class == 'MISSING_CONFIG'."""
+        from run import _run_edge_validation
+
+        run_dir = _setup_run_dir(tmp_path)
+
+        # Patch load_edge_config to raise SystemExit(2) simulating missing config
+        def _fake_load_edge_config(*args, **kwargs):
+            raise SystemExit(2)
+
+        monkeypatch.setattr(
+            "run.load_edge_config", _fake_load_edge_config,
+            raising=False,
+        )
+        # We need to monkeypatch via the import inside _run_edge_validation
+        # Since it does `from tools.edge_validate import load_edge_config`,
+        # we need to patch at the source
+        import tools.edge_validate as ev_mod
+        original = ev_mod.load_edge_config
+        monkeypatch.setattr(ev_mod, "load_edge_config", _fake_load_edge_config)
+
+        _run_edge_validation(run_dir)
+
+        monkeypatch.setattr(ev_mod, "load_edge_config", original)
+
+        with open(os.path.join(run_dir, "edge_summary.json")) as f:
+            summary = json.load(f)
+        assert summary["failure_class"] == "MISSING_CONFIG"
+
+    def test_edge_config_hash_present_when_loaded(self, tmp_path):
+        """edge_config_hash_sha256 present and correct when config loaded."""
+        from run import _run_edge_validation
+
+        r_vals = [0.5] * 40
+        trades = _make_trades(r_values=r_vals)
+        wf = _make_walk_forward(
+            expectancies=[0.01, 0.02, 0.015, 0.008, 0.005, 0.01],
+        )
+        run_dir = _setup_run_dir(tmp_path, trades_df=trades, walk_forward=wf)
+        _run_edge_validation(run_dir)
+
+        with open(os.path.join(run_dir, "edge_summary.json")) as f:
+            summary = json.load(f)
+
+        assert summary["edge_config_loaded"] is True
+        assert summary["edge_config_path"] == "config/edge.yaml"
+
+        # Verify hash matches actual file
+        config_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "config", "edge.yaml",
+        )
+        if os.path.exists(config_path):
+            with open(config_path, "rb") as f:
+                expected_hash = hashlib.sha256(f.read()).hexdigest()
+            assert summary["edge_config_hash_sha256"] == expected_hash
+
+    def test_edge_config_hash_null_when_missing(self, tmp_path, monkeypatch):
+        """edge_config_hash_sha256 is null when config not found."""
+        from run import _run_edge_validation, _edge_config_info
+
+        run_dir = _setup_run_dir(tmp_path, skip_artifact="trades")
+
+        # Patch _edge_config_info to simulate missing config
+        def _fake_config_info():
+            return {
+                "edge_config_path": "config/edge.yaml",
+                "edge_config_loaded": False,
+                "edge_config_hash_sha256": None,
+            }
+
+        import run as run_mod
+        monkeypatch.setattr(run_mod, "_edge_config_info", _fake_config_info)
+
+        _run_edge_validation(run_dir)
+
+        with open(os.path.join(run_dir, "edge_summary.json")) as f:
+            summary = json.load(f)
+        assert summary["edge_config_loaded"] is False
+        assert summary["edge_config_hash_sha256"] is None
+
+
+# ============================================================
+# TestVerdictHeader
+# ============================================================
+
+
+class TestVerdictHeader:
+    """VERDICT line must appear as the first line of edge_report.txt."""
+
+    def test_verdict_pass_in_report(self, tmp_path):
+        from run import _run_edge_validation
+
+        r_vals = [0.5] * 40
+        trades = _make_trades(r_values=r_vals)
+        wf = _make_walk_forward(
+            expectancies=[0.01, 0.02, 0.015, 0.008, 0.005, 0.01],
+        )
+        run_dir = _setup_run_dir(tmp_path, trades_df=trades, walk_forward=wf)
+        _run_edge_validation(run_dir)
+
+        with open(os.path.join(run_dir, "edge_report.txt")) as f:
+            first_line = f.readline().strip()
+        assert first_line == "VERDICT: PASS"
+
+    def test_verdict_fail_gates_in_report(self, tmp_path):
+        from run import _run_edge_validation
+
+        r_vals = [-1.0] * 40
+        trades = _make_trades(r_values=r_vals)
+        wf = _make_walk_forward(expectancies=[-0.01] * 6)
+        run_dir = _setup_run_dir(tmp_path, trades_df=trades, walk_forward=wf)
+        _run_edge_validation(run_dir)
+
+        with open(os.path.join(run_dir, "edge_report.txt")) as f:
+            first_line = f.readline().strip()
+        assert first_line == "VERDICT: FAIL_GATES"
+
+    def test_verdict_missing_in_error_report(self, tmp_path):
+        """Missing artifacts → VERDICT line present in error report."""
+        from run import _run_edge_validation
+
+        run_dir = _setup_run_dir(tmp_path, skip_artifact="trades")
+        _run_edge_validation(run_dir)
+
+        with open(os.path.join(run_dir, "edge_report.txt")) as f:
+            first_line = f.readline().strip()
+        assert first_line.startswith("VERDICT:")

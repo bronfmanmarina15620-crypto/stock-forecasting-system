@@ -380,12 +380,32 @@ def check_kill_switch(
 # Report
 # ---------------------------------------------------------------------------
 
+def classify_verdict(
+    gates: Dict[str, Dict[str, Any]],
+    kill_switch: Dict[str, Any],
+) -> str:
+    """Return a single VERDICT token matching failure_class semantics.
+
+    Called after gates + kill-switch have been computed (exit_code 0 or 1 path).
+    For exit_code 2 paths (missing config/artifacts), the caller must handle
+    the classification directly.
+    """
+    all_pass = all(g["passed"] for g in gates.values())
+    if all_pass and not kill_switch["triggered"]:
+        return "PASS"
+    return "FAIL_GATES"
+
+
 def print_report(
     metrics: Dict[str, Any],
     gates: Dict[str, Dict[str, Any]],
     kill_switch: Dict[str, Any],
 ) -> None:
     """Print a concise human-readable edge validation report."""
+    # Single-line verdict header — must be the first output line
+    verdict = classify_verdict(gates, kill_switch)
+    print(f"VERDICT: {verdict}")
+
     print("=" * 60)
     print("EDGE VALIDATION REPORT")
     print("=" * 60)
@@ -447,14 +467,14 @@ def print_report(
     else:
         print(f"  Not triggered")
 
-    # Verdict
+    # Final separator
     print(f"\n{'=' * 60}")
     if kill_switch["triggered"]:
-        print("VERDICT: FAIL (kill-switch triggered)")
+        print("RESULT: FAIL (kill-switch triggered)")
     elif not all_pass:
-        print("VERDICT: FAIL (one or more gates failed)")
+        print("RESULT: FAIL (one or more gates failed)")
     else:
-        print("VERDICT: PASS (all gates passed)")
+        print("RESULT: PASS (all gates passed)")
     print("=" * 60)
 
 
