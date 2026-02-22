@@ -109,7 +109,7 @@ In this project, "Contractual" means "enforced by `validate_run.py` checks". It 
 ### validate_run.py
 
 * Role: structural validation of run artifacts, content hash integrity, schema checks, and edge gate validation.
-* Step 10 (Edge Validation Gates): imports `tools/edge_validate.py` functions and checks edge gates as part of the validation pipeline. Propagates failures: missing artifacts or failed gates cause validation failure.
+* Edge Validation Gates step: imports `tools/edge_validate.py` functions and checks edge gates as part of the validation pipeline. Propagates failures: missing artifacts or failed gates cause validation failure.
 * Exit codes: 0 = pass, 1 = fail.
 
 ### tools/edge_validate.py
@@ -126,7 +126,7 @@ In this project, "Contractual" means "enforced by `validate_run.py` checks". It 
 
 * After a successful run, `run.py` calls edge validation and writes:
   * `edge_report.txt` — human-readable report
-  * `edge_summary.json` — machine-readable summary (`edge_pass`, `exit_code`, `N`, `expectancy`, `pf`, `mdd_r`, `kill_switch`, `gates`, `regime_table`)
+  * `edge_summary.json` — machine-readable summary (full schema defined in `run.py` edge persistence logic)
 
 ---
 

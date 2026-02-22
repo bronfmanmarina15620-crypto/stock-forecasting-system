@@ -111,7 +111,7 @@ Do not change without updating this file and tests.
 | RESET_STREAK | 3 | — | Positive windows to reset kill-switch |
 
 ### Calibration method
-Thresholds are calibrated by `tools/edge_calibrate.py` using rule-based quantile extraction from eligible historical runs (runs with all 4 required artifacts present):
+Thresholds are calibrated by `tools/edge_calibrate.py` (authoritative implementation) using rule-based quantile extraction from eligible historical runs (runs with all 4 required artifacts present). The formulas below summarize the current approach; if discrepancies exist, `tools/edge_calibrate.py` is the source of truth.
 - **n_min**: `max(floor=30, floor(p25 of N))` — p25 ensures 75%+ of historical runs pass.
 - **e_min, pf_min, wf_e_min**: Theoretical floors (0.0, 1.0, 0.0) — non-negative expectancy and edge presence are economically meaningful regardless of data.
 - **mdd_max**: `min(ceiling=15.0, max(p90 of MDD_R * 2, floor=5.0))` — 2x headroom over observed p90.

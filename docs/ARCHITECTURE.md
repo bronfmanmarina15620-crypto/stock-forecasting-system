@@ -109,16 +109,11 @@ Each agent may emit additional files (logs, HTML reports, parquet analysis files
 
 ### GREEN (all must pass)
 
-`validate_run.py` runs 10 validation steps: artifact completeness, sanity tests, required metrics, abstain stats, OOS sample size, final report schema, status.json structure, content hash integrity, drift summary (optional), and edge gates. See `validate_run.py` for the authoritative step list and thresholds.
+`validate_run.py` runs a series of validation steps (artifact completeness, sanity tests, required metrics, content hash integrity, edge gates, and others). See `validate_run.py` for the authoritative step list and thresholds.
 
 ### RED (any failure)
 
-- Missing required artifact -> RED
-- Sanity test AUC above threshold -> RED (possible leakage)
-- Missing required metric/abstain fields -> RED
-- Content hash mismatch -> RED
-- Edge gates fail -> RED
-- Agent status == FAILED -> RED
+Any validation step failure causes RED. Common failure classes include missing required artifacts, sanity test leakage detection, content hash mismatches, and edge gate failures. See `validate_run.py` for the authoritative failure conditions and thresholds.
 
 ### Where computed
 

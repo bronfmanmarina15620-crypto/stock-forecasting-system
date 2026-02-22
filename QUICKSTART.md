@@ -21,17 +21,7 @@ This installs:
 python run.py --ticker PLTR
 ```
 
-This will:
-1. ✅ Create a unique run ID
-2. ✅ Fetch PLTR historical data
-3. ✅ Generate features
-4. ✅ Detect market regimes
-5. ✅ Train event model
-6. ✅ Run walk-forward backtest
-7. ✅ Generate trading decisions
-8. ✅ Create portfolio plan
-9. ✅ Generate final HTML report
-10. ✅ Learn from the run
+This will run the full agent pipeline (data ingestion through dashboard generation). Pipeline order is defined in `agents/orchestrator_agent.py`.
 
 ### 3. View Results
 
@@ -51,11 +41,7 @@ runs/PLTR/20240214_120000_abc123/final_report.html
 python validate_run.py --run runs/PLTR/20240214_120000_abc123
 ```
 
-This checks:
-- ✅ All agent directories exist
-- ✅ All output.json files present
-- ✅ Final reports generated
-- ✅ Status file exists
+This runs the full validation suite (artifact completeness, integrity checks, edge gates, and more). See `validate_run.py` for the authoritative step list.
 
 ## Understanding the Output
 
@@ -138,10 +124,8 @@ This is more reliable and actionable than price predictions.
 
 ### Conservative by Default
 - Default decision: **ABSTAIN** (stay in cash)
-- Only enters when:
-  - Probability > threshold (60% by default)
-  - Market regime is favorable
-  - Model calibration is confident
+- Single strategy: MA150 + ATR (see `docs/00_SYSTEM_BRAIN/STRATEGY_CONTRACT_MA150_ATR.md`)
+- Only enters when technical conditions, regime, and edge gates are all satisfied
 
 ### Realistic Backtesting
 - Walk-forward validation (no peeking at future)
@@ -159,7 +143,7 @@ This is more reliable and actionable than price predictions.
 
 ### "Failed to fetch data from Yahoo Finance"
 
-**Solution**: Check internet connection. System will try backup sources automatically.
+**Solution**: Check internet connection. If the data provider is unavailable, the run will fail (no silent fallback to alternate sources).
 
 ### "Data quality validation failed"
 
