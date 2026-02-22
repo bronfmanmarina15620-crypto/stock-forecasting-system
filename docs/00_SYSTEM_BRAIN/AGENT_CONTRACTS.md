@@ -10,6 +10,8 @@ Pipeline order is defined in `agents/orchestrator_agent.py`.
 
 Agents whose outputs are not enforced by `validate_run.py` list their outputs as "Outputs (as implemented)".
 
+In this project, "Contractual" means "enforced by `validate_run.py` checks". It is not a guarantee that the artifact list will never evolve; it is the current validator gate.
+
 ---
 
 ## OrchestratorAgent
