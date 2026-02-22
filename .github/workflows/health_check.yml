@@ -27,9 +27,28 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          python -m pip install pytest
+
+      - name: Pre-guard (runs/ must not exist)
+        run: |
+          test ! -d runs || (echo "ERROR: runs/ exists before health check" && exit 1)
 
       - name: Import smoke test
         run: python -c "from strategy.ma150_atr import compute_ma150_atr_strategy; print('IMPORT_OK')"
 
       - name: Run unit tests (fast subset)
         run: python -m pytest tests/test_ma150_atr_strategy.py -q
+
+      - name: Post-guard (no runs/ created, clean tree)
+        run: |
+          if [ -d runs ]; then
+            echo "ERROR: health check created runs/"
+            find runs -maxdepth 2 -type f | head -50
+            exit 1
+          fi
+          DIRTY=$(git status --porcelain)
+          if [ -n "$DIRTY" ]; then
+            echo "ERROR: health check left dirty working tree"
+            echo "$DIRTY"
+            exit 1
+          fi
