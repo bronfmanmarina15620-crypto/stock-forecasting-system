@@ -82,6 +82,29 @@ jobs:
           echo "drift_eligible=${DRIFT_ELIGIBLE}" >> "$GITHUB_OUTPUT"
           echo "drift_scanned=${DRIFT_SCANNED}" >> "$GITHUB_OUTPUT"
           echo "drift_reason=${DRIFT_REASON}" >> "$GITHUB_OUTPUT"
+          # Read edge summary if present
+          EDGE="${RUN_DIR}/edge_summary.json"
+          if [ -f "$EDGE" ]; then
+            EDGE_PASS=$(python3 -c "import json; e=json.load(open('${EDGE}')); print('PASS' if e.get('edge_pass') else 'FAIL')" || echo "na")
+            EDGE_EXIT_CODE=$(python3 -c "import json; print(json.load(open('${EDGE}')).get('exit_code',2))" || echo "2")
+            EDGE_N=$(python3 -c "import json; print(json.load(open('${EDGE}')).get('N',0))" || echo "0")
+            EDGE_E=$(python3 -c "import json; print(round(json.load(open('${EDGE}')).get('expectancy',0.0),4))" || echo "0")
+            EDGE_PF=$(python3 -c "import json; print(round(json.load(open('${EDGE}')).get('pf',0.0),4))" || echo "0")
+            EDGE_MDD=$(python3 -c "import json; print(round(json.load(open('${EDGE}')).get('mdd_r',0.0),4))" || echo "0")
+            FAILURE_CLASS=$(python3 -c "import json; print(json.load(open('${EDGE}')).get('failure_class','UNKNOWN'))" || echo "UNKNOWN")
+            EDGE_CONFIG_LOADED=$(python3 -c "import json; print(str(json.load(open('${EDGE}')).get('edge_config_loaded',False)).lower())" || echo "false")
+          else
+            EDGE_PASS="na"; EDGE_EXIT_CODE="2"; EDGE_N="0"; EDGE_E="0"; EDGE_PF="0"; EDGE_MDD="0"
+            FAILURE_CLASS="EDGE_SUMMARY_MISSING"; EDGE_CONFIG_LOADED="false"
+          fi
+          echo "edge_pass=${EDGE_PASS}" >> "$GITHUB_OUTPUT"
+          echo "edge_exit_code=${EDGE_EXIT_CODE}" >> "$GITHUB_OUTPUT"
+          echo "edge_n=${EDGE_N}" >> "$GITHUB_OUTPUT"
+          echo "edge_e=${EDGE_E}" >> "$GITHUB_OUTPUT"
+          echo "edge_pf=${EDGE_PF}" >> "$GITHUB_OUTPUT"
+          echo "edge_mdd=${EDGE_MDD}" >> "$GITHUB_OUTPUT"
+          echo "failure_class=${FAILURE_CLASS}" >> "$GITHUB_OUTPUT"
+          echo "edge_config_loaded=${EDGE_CONFIG_LOADED}" >> "$GITHUB_OUTPUT"
 
       - name: Validate run
         id: validate
@@ -103,14 +126,19 @@ jobs:
           DRIFT_ELIGIBLE="${{ steps.shadow.outputs.drift_eligible }}"
           DRIFT_SCANNED="${{ steps.shadow.outputs.drift_scanned }}"
           DRIFT_REASON="${{ steps.shadow.outputs.drift_reason }}"
+          EDGE_PASS="${{ steps.shadow.outputs.edge_pass }}"
+          EDGE_N="${{ steps.shadow.outputs.edge_n }}"
+          EDGE_E="${{ steps.shadow.outputs.edge_e }}"
+          EDGE_PF="${{ steps.shadow.outputs.edge_pf }}"
+          EDGE_MDD="${{ steps.shadow.outputs.edge_mdd }}"
           # Include drift info only if DriftAgent ran
           if [ "$DRIFT_STATUS" != "na" ]; then
             DRIFT_PART=" | DRIFT=${DRIFT_STATUS}/${DRIFT_FLAG} COVERAGE=${DRIFT_USED}/${DRIFT_ELIGIBLE} SCANNED=${DRIFT_SCANNED} REASON=${DRIFT_REASON}"
           else
             DRIFT_PART=""
           fi
-          TEXT=$(printf '\xe2\x9c\x85 SHADOW OK | PLTR | RUN_ID=%s | DECISION=%s | REGIME=%s%s' \
-            "$RUN_ID" "$DECISION" "$REGIME" "$DRIFT_PART")
+          TEXT=$(printf '\xe2\x9c\x85 SHADOW OK | PLTR | RUN_ID=%s | DECISION=%s | REGIME=%s | Edge: PASS exit=0 N=%s E=%s PF=%s MDD_R=%s%s' \
+            "$RUN_ID" "$DECISION" "$REGIME" "$EDGE_N" "$EDGE_E" "$EDGE_PF" "$EDGE_MDD" "$DRIFT_PART")
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
             --data-urlencode "text=${TEXT}" || true
@@ -134,8 +162,25 @@ jobs:
           TOKEN_LEN=${#TELEGRAM_BOT_TOKEN}
           CHAT_TAIL="${TELEGRAM_CHAT_ID: -3}"
           echo "Telegram token length: ${TOKEN_LEN}, chat_id tail: ...${CHAT_TAIL}"
-          TEXT=$(printf '\xe2\x9d\x8c SHADOW FAIL | PLTR | RUN_ID=%s | STEP=%s' \
-            "${RUN_ID:-na}" "$STEP_NAME")
+          FAILURE_CLASS="${{ steps.shadow.outputs.failure_class }}"
+          FAILURE_CLASS="${FAILURE_CLASS:-UNKNOWN}"
+          EDGE_EXIT_CODE="${{ steps.shadow.outputs.edge_exit_code }}"
+          EDGE_EXIT_CODE="${EDGE_EXIT_CODE:-2}"
+          EDGE_N="${{ steps.shadow.outputs.edge_n }}"
+          EDGE_E="${{ steps.shadow.outputs.edge_e }}"
+          EDGE_PF="${{ steps.shadow.outputs.edge_pf }}"
+          EDGE_MDD="${{ steps.shadow.outputs.edge_mdd }}"
+          # Build fix hint based on failure_class
+          FIX_HINT=""
+          if [ "$FAILURE_CLASS" = "MISSING_CONFIG" ]; then
+            FIX_HINT=" | Fix: ensure config/edge.yaml exists on main (not ignored) and is packaged in the repo."
+          elif [ "$FAILURE_CLASS" = "MISSING_ARTIFACTS" ]; then
+            FIX_HINT=" | Fix: validate_run step before edge must produce trades.parquet + robustness artifacts."
+          elif [ "$FAILURE_CLASS" = "EDGE_SUMMARY_MISSING" ]; then
+            FIX_HINT=" | Fix: edge_summary.json not produced; check run.py edge validation persistence and validation order."
+          fi
+          TEXT=$(printf '\xe2\x9d\x8c SHADOW FAIL | PLTR | RUN_ID=%s | STEP=%s | Edge: %s exit=%s N=%s E=%s PF=%s MDD_R=%s%s' \
+            "${RUN_ID:-na}" "$STEP_NAME" "$FAILURE_CLASS" "$EDGE_EXIT_CODE" "$EDGE_N" "$EDGE_E" "$EDGE_PF" "$EDGE_MDD" "$FIX_HINT")
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
             --data-urlencode "text=${TEXT}" || true

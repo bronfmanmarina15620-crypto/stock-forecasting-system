@@ -1,0 +1,22 @@
+# Edge validation thresholds -- EDGE_DEFINITION.md Section 6
+# Calibrated by tools/edge_calibrate.py (rule-based, deterministic).
+# Do not change without updating EDGE_DEFINITION.md and tests.
+
+edge_gates:
+  # Section 3.1: Minimum sample size
+  n_min: 30                        # minimum trade count
+  # Section 3.2: Core profitability
+  e_min: 0.0                       # minimum expectancy E[R] (mean R-multiple)
+  pf_min: 1.0                      # minimum profit factor (sum wins / abs sum losses)
+  # Section 3.3: Drawdown
+  mdd_max: 5.0                     # max drawdown in R (cumulative R units)
+  # Section 3.4: Stability -- rolling expectancy
+  roll_k: 20                       # rolling window size (trades)
+  pos_roll_ratio_min: 0.5          # fraction of rolling windows with E_roll > 0
+  # Section 3.4: Stability -- walk-forward
+  wf_e_min: 0.0                    # median walk-forward expectancy (%-return based)
+  wf_pos_folds_min: 0.5            # fraction of folds with positive expectancy
+  # Section 5: Kill-switch
+  roll_fail_streak: 5              # consecutive negative rolling windows -> kill
+  dd_shock: 10.0                   # drawdown in R exceeding this -> kill
+  reset_streak: 3                  # consecutive positive windows to reset kill-switch

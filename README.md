@@ -5,7 +5,7 @@ A production-grade, explainable stock forecasting and portfolio management syste
 ## 🎯 Key Features
 
 - **Event-Based Forecasting**: Predicts probabilities of defined market events (e.g., "5-day return ≥ +2%")
-- **10 Specialized Agents**: Strict separation of concerns, coordinated by OrchestratorAgent
+- **Specialized Agent Pipeline**: Strict separation of concerns, coordinated by OrchestratorAgent (see `agents/orchestrator_agent.py` for authoritative pipeline order)
 - **Data Leakage Prevention**: Built-in unit tests, strictly "as-of" features, forward-only labels
 - **Walk-Forward Backtesting**: Realistic evaluation with trading frictions (commissions, spread, slippage)
 - **Conservative Decision Making**: Default = ABSTAIN, enter only with high probability + regime confirmation
@@ -80,183 +80,109 @@ stock-forecasting-system/
 ├── run.py                      # CLI entrypoint
 ├── validate_run.py             # Run validator
 ├── config.py                   # System configuration
+├── config/strategy.yaml        # Strategy parameters (source of truth)
 ├── utils.py                    # Utility functions
 ├── requirements.txt            # Dependencies
 │
-├── agents/                     # All pipeline agents
-│   ├── __init__.py
-│   ├── base_agent.py           # Base agent class
-│   ├── orchestrator_agent.py   # Agent 1: Coordinator
-│   ├── data_agent.py           # Agent 2: Data fetching
-│   ├── feature_agent.py        # Agent 3: Feature engineering
-│   ├── regime_agent.py         # Agent 4: Regime detection
-│   ├── volatility_regime_agent.py # Agent 4b: Volatility regime filter (Phase 5)
-│   ├── event_model_agent.py    # Agent 5: Event model training
-│   ├── backtest_agent.py       # Agent 6: Walk-forward backtest
-│   ├── decision_risk_agent.py  # Agent 7: Decision making
-│   ├── robustness_agent.py     # Agent 7b: Robustness validation (Phase 6)
-│   ├── portfolio_agent.py      # Agent 8: Portfolio planning
-│   ├── shadow_monitor_agent.py # Agent 8b: Shadow mode drift metrics (Phase 7)
-│   ├── drift_agent.py          # Agent 8c: Cross-run drift analysis (Phase 8)
-│   ├── dashboard_agent.py      # Agent 9: Dashboard generation
-│   └── memory_learning_agent.py # Agent 10: Memory & learning
+├── agents/                     # Pipeline agents (see orchestrator_agent.py for order)
+│   ├── orchestrator_agent.py   # Coordinator — defines pipeline order
+│   ├── base_agent.py           # Abstract base class
+│   └── ...                     # One module per agent
+│
+├── strategy/                   # Pure strategy logic
+│   └── ma150_atr.py            # MA150+ATR strategy implementation
 │
 ├── analytics/                  # Pure metric functions
 │   └── drift_metrics.py        # Z-score drift, history discovery, coverage
 │
 ├── datasources/                # Data source adapters
-│   ├── __init__.py
-│   ├── base.py                 # Base adapter interface
-│   ├── yahoo_finance.py        # Yahoo Finance adapter
-│   └── stooq.py                # Stooq adapter (stub)
+│   └── ...                     # Yahoo Finance (primary), Stooq (stub)
+│
+├── tools/                      # Standalone tooling
+│   └── edge_validate.py        # Edge gate validation (quantitative)
 │
 ├── runs/                       # Run outputs (created automatically)
-│   └── PLTR/
-│       └── 20240214_120000_abc123/
-│           ├── config.json             # Configuration snapshot
-│           ├── status.txt              # Run status
-│           ├── final_report.html       # Final HTML report
-│           ├── final_report.json       # Final JSON report
-│           │
-│           ├── DataAgent/
-│           │   ├── output.json
-│           │   ├── agent.log
-│           │   ├── bars_raw.parquet
-│           │   ├── bars_adj.parquet
-│           │   └── quality_report.json
-│           │
-│           ├── FeatureAgent/
-│           │   ├── output.json
-│           │   ├── agent.log
-│           │   ├── features_v1.parquet
-│           │   └── feature_manifest.json
-│           │
-│           ├── RegimeAgent/
-│           │   ├── output.json
-│           │   ├── agent.log
-│           │   ├── regime_series.parquet
-│           │   └── regime_definition.json
-│           │
-│           ├── EventModelAgent/
-│           │   ├── output.json
-│           │   ├── agent.log
-│           │   ├── event_model.pkl
-│           │   ├── calibration.json
-│           │   └── model_card.md
-│           │
-│           ├── BacktestAgent/
-│           │   ├── output.json
-│           │   ├── agent.log
-│           │   ├── trades.parquet
-│           │   ├── pnl_series.parquet
-│           │   ├── metrics.json
-│           │   ├── risk_explain.json
-│           │   ├── backtest_report.html
-│           │   └── legacy_ml/            # (only when backtest_mode: legacy_ml)
-│           │
-│           ├── DecisionRiskAgent/
-│           │   ├── output.json
-│           │   ├── agent.log
-│           │   ├── signals.csv
-│           │   ├── decision_explain.json
-│           │   ├── strategy_pnl.parquet
-│           │   └── decision_action.json
-│           │
-│           ├── PortfolioAgent/
-│           │   ├── output.json
-│           │   ├── agent.log
-│           │   ├── portfolio_plan.json
-│           │   ├── portfolio_report.html
-│           │   └── risk_summary.json
-│           │
-│           ├── DashboardAgent/
-│           │   ├── output.json
-│           │   └── agent.log
-│           │
-│           └── MemoryLearningAgent/
-│               ├── output.json
-│               ├── agent.log
-│               ├── lessons_learned.md
-│               └── suggestions.json
+│   └── <TICKER>/<RUN_ID>/      # Per-run folder; see "Run Artifacts" below
 │
-├── memory/                     # Memory database
-│   └── memory_db.sqlite
+├── memory/                     # Memory database (SQLite)
 │
 └── data_cache/                 # Cached market data
-    └── PLTR_YahooFinanceAdapter.parquet
 ```
 
-## 🤖 The 10 Agents
+### Run Artifacts
 
-### 1. OrchestratorAgent
-- **Role**: Coordinates all agents
+Each run produces a folder under `runs/<TICKER>/<RUN_ID>/` containing:
+
+**Contractual artifacts** (required for validity; enforced by `validate_run.py` `REQUIRED_ARTIFACTS`):
+- Root-level: `status.txt`, `status.json`, `config.json`, `config_snapshot.yaml`, `final_report.html`, `final_report.json`
+- Per-agent: as defined in `validate_run.py` (e.g., `BacktestAgent/trades.parquet`, `DecisionRiskAgent/decision_action.json`)
+- Mode-dependent: `ShadowMonitorAgent/` and `DriftAgent/` artifacts are validated only when the corresponding folder exists
+
+**Optional / debug artifacts**: Additional files (logs, HTML reports, analysis outputs) may be emitted per agent for debugging and analysis. See each agent's implementation for the current set.
+
+> **Authoritative list**: `validate_run.py` `REQUIRED_ARTIFACTS` dict is the single source of truth for which artifacts are required.
+
+## 🤖 Agent Pipeline
+
+The pipeline is defined by **`agents/orchestrator_agent.py`** (authoritative). Agent ordering and mode-dependent insertion (e.g., shadow mode) are implemented in the orchestrator; the list below describes agent roles at a high level.
+
+### OrchestratorAgent
+- **Role**: Coordinates agent execution in pipeline order
 - **Responsibilities**: Creates run structure, executes agents in order, validates outputs
 - **Critical Rule**: No agent may directly call another
 
-### 2. DataAgent
+### DataAgent
 - **Role**: Fetches and validates market data
 - **Outputs**: OHLCV bars (raw & adjusted), data quality report
 - **Failure Mode**: If data quality fails → entire run fails
 
-### 3. FeatureAgent
+### FeatureAgent
 - **Role**: Engineers features strictly "as-of" time
 - **Outputs**: Feature set with manifest
 - **Critical Rule**: All features must use only past data (shifted by 1 day minimum)
 
-### 4. RegimeAgent
+### RegimeAgent
 - **Role**: Labels market regimes (trend/range, high/low volatility)
 - **Outputs**: Daily regime labels with transparent rules
 - **Regimes**: TREND_LOW_VOL, TREND_HIGH_VOL, RANGE_LOW_VOL, RANGE_HIGH_VOL
 
-### 5. EventModelAgent
+### EventModelAgent
 - **Role**: Trains probabilistic event model
 - **Outputs**: Calibrated model, model card
 - **Event**: "5-day forward return ≥ +2%" (configurable)
 
-### 6. BacktestAgent
+### BacktestAgent
 - **Role**: Walk-forward validation with realistic frictions
 - **Mode**: `signals_only` (default) uses Phase 2 strategy signals; `legacy_ml` uses ML walk-forward
 - **Outputs**: trades.parquet, pnl_series.parquet, metrics.json, risk_explain.json
 - **Includes**: Phase 4 position sizing, trading costs (commissions + spread + slippage)
 
-### 7. DecisionRiskAgent
+### DecisionRiskAgent
 - **Role**: Converts probabilities into ENTER/ABSTAIN decisions
 - **Outputs**: Trading signals, strategy P&L, current decision
 - **Default**: ABSTAIN (conservative approach)
 - **Enter Conditions**: Probability > threshold AND regime allowed
 
-### 8. PortfolioAgent (PASSIVE MODE)
+### PortfolioAgent (PASSIVE MODE)
 - **Role**: Portfolio planning (no execution)
 - **Outputs**: Position plan, risk summary
 - **Note**: Currently in planning-only mode for PLTR
 
-### 9. DashboardAgent
+### DashboardAgent
 - **Role**: Generates final HTML + JSON reports
 - **Outputs**: Comprehensive dashboard with all metrics
 - **Features**: Today card, backtest history, drawdown, calibration, regime breakdown
 
-### 10. MemoryLearningAgent
+### MemoryLearningAgent
 - **Role**: Learns from historical runs, suggests improvements
 - **Outputs**: Lessons learned, suggestions (manual review required)
 - **Critical Rule**: NO automatic changes, suggestions only
 
 ## ⚙️ Configuration
 
-Edit `config.py` or provide a custom JSON configuration:
+Configuration is split between `config.py` (system-level dataclasses) and `config/strategy.yaml` (strategy parameters, source of truth for defaults). You can also provide a custom JSON via `--config`.
 
-```python
-# Key configuration parameters
-ticker = "PLTR"                          # Currently active ticker
-random_seed = 42                         # Reproducibility
-lookback_days = 730                      # 2 years historical data
-event_threshold_pct = 2.0                # Event: +2% in 5 days
-probability_threshold = 0.60             # Enter if P(event) > 60%
-allowed_regimes = ["TREND_LOW_VOL", "TREND_HIGH_VOL"]
-max_position_size_pct = 0.20             # 20% max position
-commission_pct = 0.001                   # 0.1% per trade
-spread_bps = 2.0                         # 2 bps
-slippage_bps = 3.0                       # 3 bps
-```
+Defaults are defined in **`config/strategy.yaml`** and **`config.py`**. Refer to those files for current values rather than relying on documentation snapshots.
 
 ## Phase 4: Risk-Based Position Sizing
 
@@ -270,24 +196,15 @@ Guardrails cap exposure by `max_position_pct` and `max_leverage`, and skip trade
 
 ### Configuration
 
-All risk parameters live in `config/strategy.yaml`:
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `risk_per_trade` | 0.005 | Fraction of equity risked per trade |
-| `capital_base` | 100000 | Starting equity ($) |
-| `max_leverage` | 1.0 | Maximum portfolio leverage |
-| `max_position_pct` | 0.25 | Maximum single-position size (fraction of equity) |
-| `min_stop_pct` | 0.01 | Minimum stop distance (% from entry) |
-| `max_stop_pct` | 0.20 | Maximum stop distance (% from entry) |
+All risk parameters live in **`config/strategy.yaml`** (source of truth). Key parameters include `risk_per_trade`, `capital_base`, `max_leverage`, `max_position_pct`, `min_stop_pct`, and `max_stop_pct`. See that file for current defaults.
 
 ### Artifacts
 
 | Path | Description |
 |------|-------------|
 | `BacktestAgent/risk_explain.json` | Audit trail: sizing decision for every trade |
-| `BacktestAgent/trades.parquet` | 7 added columns: `shares`, `notional`, `exposure_pct`, `stop_distance`, `stop_pct`, `risk_budget`, `r_multiple` |
-| `BacktestAgent/metrics.json` | 9 added keys: `avg_exposure_pct`, `max_exposure_pct`, `avg_r_multiple`, `median_r_multiple`, `worst_r_multiple`, `best_r_multiple`, `pct_trades_skipped_due_to_stop_bounds`, `pct_trades_capped_by_max_position`, `realized_risk_per_trade_avg` |
+| `BacktestAgent/trades.parquet` | Includes Phase 4 sizing columns (see `agents/backtest_agent.py` for current schema) |
+| `BacktestAgent/metrics.json` | Includes Phase 4 risk metrics (see `validate_run.py` for required keys) |
 
 ### How to run and validate
 
@@ -296,7 +213,7 @@ python run.py --ticker PLTR
 python validate_run.py --run runs/PLTR/<RUN_ID>
 ```
 
-`validate_run.py` checks all 9 Phase 4 metric keys plus `risk_explain.json` existence.
+`validate_run.py` checks Phase 4 metric keys and `risk_explain.json` existence. See `validate_run.py` `REQUIRED_ARTIFACTS` for the authoritative list.
 
 When `backtest_mode: legacy_ml`, stub `risk_explain.json` and zeroed Phase 4 metrics are emitted so validation still passes.
 
@@ -317,31 +234,13 @@ RobustnessAgent runs after BacktestAgent and produces evaluation/validation outp
 
 ### Analyses
 
-| Analysis | Description |
-|----------|-------------|
-| Walk-Forward Validation | Rolling train/test windows (6 default) — same strategy params, segmented evaluation |
-| Parameter Sensitivity Map | Grid around `atr_mult` (±20%) and `risk_pct` (±50%) — 25 grid points |
-| Monte Carlo Trade Reshuffle | 1000 reshuffles of realized trade returns with fixed seed |
-| Exposure Decomposition | Time-in-market, avg exposure, high-vol regime exposure, benchmark correlation |
-| Regime Contribution | Performance split by volatility regime buckets (QUIET/NORMAL/EXPANDING/EXTREME) |
-| Capacity Test | Max position vs ADV estimate — categorized tiny/small/moderate/large |
+RobustnessAgent performs walk-forward validation, parameter sensitivity, Monte Carlo reshuffle, exposure decomposition, regime contribution, and capacity testing. See `agents/robustness_agent.py` for current analysis parameters and implementation details.
 
 ### Artifacts
 
-All outputs saved under `runs/<TICKER>/<RUN_ID>/RobustnessAgent/`:
+**Contractual** (enforced by `validate_run.py`): `summary.json`, `monte_carlo.json`
 
-| File | Format | Description |
-|------|--------|-------------|
-| `summary.json` | JSON | Top-level summary with key risk stats |
-| `walk_forward.json` | JSON | Per-window walk-forward results |
-| `walk_forward.csv` | CSV | Same, tabular |
-| `sensitivity_map.json` | JSON | Grid search results |
-| `sensitivity_map.csv` | CSV | Same, tabular |
-| `monte_carlo.json` | JSON | Reshuffle simulation (percentiles, distribution) |
-| `monte_carlo.csv` | CSV | Distribution summary |
-| `exposure_decomposition.json` | JSON | Exposure analysis |
-| `regime_contribution.json` | JSON | Per-regime performance buckets |
-| `capacity_test.json` | JSON | ADV ratio and categorization |
+**Optional**: Additional analysis outputs (walk-forward, sensitivity map, exposure decomposition, regime contribution, capacity test) are saved under `RobustnessAgent/`. See `agents/robustness_agent.py` for the current set.
 
 ### How to run
 
@@ -398,11 +297,9 @@ DriftAgent analyzes accumulated shadow runs to detect behavioral drift. After 30
 
 ### Artifacts
 
-| Path | Description |
-|------|-------------|
-| `DriftAgent/drift_summary.json` | Schema v1.0: status, z-scores, decision distribution, overall flag |
-| `DriftAgent/drift_timeseries.parquet` | One row per historical run + current (raw values + z-scores) |
-| `DriftAgent/status.txt` | One-line status summary |
+**Contractual** (enforced by `validate_run.py` when `DriftAgent/` folder exists): `drift_summary.json`
+
+**Optional**: `drift_timeseries.parquet`, `status.txt`. See `agents/drift_agent.py` for the current set.
 
 ### Interpreting OK vs WARN
 
@@ -421,20 +318,7 @@ The drift summary appears in `final_report.html` and `final_report.json` under t
 
 ### Coverage
 
-`drift_summary.json` includes coverage telemetry so you can track how many runs contributed to drift metrics:
-
-| Field | Definition |
-|-------|-----------|
-| `total_runs_scanned` | Run directories inspected (excludes current run, hidden dirs) |
-| `eligible_runs_found` | Runs that passed all checks (SUCCESS + has decision) |
-| `runs_used_in_window` | Runs actually used for z-scores (capped at `window_k=60`) |
-| `runs_excluded` | Runs skipped — always equals `total_runs_scanned - eligible_runs_found` |
-| `excluded_reasons` | Breakdown: `not_success`, `missing_decision`, `missing_required_artifacts`, `validate_failed`, `other` |
-| `excluded_run_ids_sample` | First 10 excluded run IDs (sorted ascending) for debugging |
-| `excluded_run_ids_by_reason_sample` | Per-reason samples (max 5 each) for debugging |
-| `drift_reason_summary` | Human-readable one-liner: `"OK: no 2-sigma drift detected"`, `"WARN: atr_percentile z=+2.5"`, or `"STATUS=INSUFFICIENT_HISTORY (need >=30 runs)"` |
-
-Runs may be excluded because they failed (`not_success`), lack `DecisionRiskAgent/decision_action.json` (`missing_decision`), or have corrupt/missing status files.
+`drift_summary.json` includes coverage telemetry (total runs scanned, eligible runs, excluded reasons, debug samples) so you can track how many runs contributed to drift metrics. Full schema is defined by `agents/drift_agent.py` and `analytics/drift_metrics.py`.
 
 ## 🛡️ Safety Features
 

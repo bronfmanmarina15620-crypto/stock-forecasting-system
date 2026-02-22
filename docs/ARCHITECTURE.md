@@ -20,26 +20,15 @@ Default action is always ABSTAIN.
 
 ## Pipeline Stages
 
+**Authoritative pipeline**: see `agents/orchestrator_agent.py`. Mode-dependent pipeline (e.g., shadow vs normal) uses conditional insertion defined in the orchestrator.
+
+The high-level flow is:
+
 ```
-Data -> Features -> Regime -> EventModel -> Backtest -> Decision/Risk -> Drift -> Portfolio -> [ShadowMonitor] -> Dashboard -> Memory
+Data -> Features -> Regime -> VolatilityRegime -> EventModel -> Strategy -> Backtest -> Robustness -> Decision/Risk -> [Drift] -> Portfolio -> [ShadowMonitor] -> Dashboard -> Memory
 ```
 
-| # | Stage           | Agent                | Purpose                                    |
-|---|-----------------|----------------------|--------------------------------------------|
-| 1 | Data            | `DataAgent`          | Fetch OHLCV from Yahoo (primary), Stooq (backup) |
-| 2 | Features        | `FeatureAgent`       | Generate as-of features (returns, vol, ATR, MA) |
-| 3 | Regime          | `RegimeAgent`        | Label market regime (TREND/RANGE x LOW/HIGH VOL) |
-| 4 | Event Model     | `EventModelAgent`    | Train logistic model for 5-day +2% event   |
-| 5 | Backtest        | `BacktestAgent`      | Walk-forward OOS evaluation with costs      |
-| 6 | Decision/Risk   | `DecisionRiskAgent`  | ENTER/ABSTAIN logic + P&L + abstain stats   |
-| 7 | Portfolio       | `PortfolioAgent`     | Position sizing (PASSIVE mode, no execution)|
-| 7b| Shadow Monitor  | `ShadowMonitorAgent` | Drift metrics + monitoring (shadow mode only, Phase 7) |
-| 7c| Drift Analysis  | `DriftAgent`         | Cross-run drift z-scores from shadow history (Phase 8) |
-| 8 | Dashboard       | `DashboardAgent`     | Generate final_report.html + final_report.json |
-| 9 | Memory          | `MemoryLearningAgent`| Store run metrics, generate suggestions     |
-
-The `OrchestratorAgent` coordinates execution. No agent calls another directly.
-In shadow mode (`--mode shadow`), `ShadowMonitorAgent` is inserted before `DashboardAgent`.
+The `OrchestratorAgent` coordinates execution. No agent calls another directly. Agent ordering and mode-dependent insertion (e.g., ShadowMonitorAgent in shadow mode) are implemented in the orchestrator; docs should not hard-code counts or exact ordering.
 
 ---
 
@@ -91,70 +80,26 @@ In shadow mode (`--mode shadow`), `ShadowMonitorAgent` is inserted before `Dashb
 
 ## Run Directory Structure
 
-Every run produces:
+Every run produces a folder under `runs/<TICKER>/<RUN_ID>/` with per-agent subdirectories.
 
-```
-runs/PLTR/<RUN_ID>/
-  config_snapshot.yaml         # Frozen config for this run
-  config.json                  # Frozen config (JSON format)
-  status.json                  # Per-stage pass/fail with timestamps
-  status.txt                   # Human-readable status (legacy)
-  final_report.html            # Dashboard HTML
-  final_report.json            # Machine-readable report
-  DataAgent/
-    output.json                # Agent output metadata
-    agent.log                  # Agent log
-    bars_raw.parquet           # Raw OHLCV
-    bars_adj.parquet           # Adjusted OHLCV
-    quality_report.json        # Data quality checks
-  FeatureAgent/
-    output.json
-    features_v1.parquet        # Generated features
-    feature_manifest.json      # Feature descriptions + stats
-  RegimeAgent/
-    output.json
-    regime_series.parquet      # Regime label per date
-    regime_definition.json     # Regime definitions + counts
-  EventModelAgent/
-    output.json
-    event_model.pkl            # Trained model
-    calibration.json           # Calibration stats
-    model_card.md              # Model documentation
-  BacktestAgent/
-    output.json
-    predictions_oos.parquet    # OOS predictions
-    trades.parquet             # Trade records
-    pnl_series.parquet         # Cumulative P&L
-    metrics.json               # Performance metrics
-    sanity_tests.json          # Leakage detection results
-    costs_assumptions.json     # Trading cost details
-    backtest_report.html       # Backtest visual report
-  DecisionRiskAgent/
-    output.json
-    signals.csv                # All signals with actions
-    decision_action.json       # Current decision (latest)
-    decision_explain.json      # Decision statistics
-    strategy_pnl.parquet       # Strategy P&L series
-    abstain_stats.json         # Abstain/Enter ratios
-  PortfolioAgent/
-    output.json
-    portfolio_plan.json        # Allocation plan
-    portfolio_report.html      # Portfolio visual report
-    risk_summary.json          # Risk metrics
-  DriftAgent/
-    output.json                # Agent output metadata
-    drift_summary.json         # Z-scores, drift flag, coverage counts, debug samples, drift_reason_summary
-    drift_timeseries.parquet   # Per-run history with z-scores
-    status.txt                 # One-line status summary
-  DashboardAgent/
-    output.json                # Agent output metadata
-  MemoryLearningAgent/
-    output.json
-    lessons_learned.md         # Run insights
-    suggestions.json           # Improvement suggestions
-  OrchestratorAgent/
-    output.json                # Orchestrator summary
-```
+### Contractual artifacts (required for validity)
+
+Enforced by `validate_run.py` `REQUIRED_ARTIFACTS`. Missing contractual artifacts cause validation failure.
+
+| Scope | Examples |
+|-------|---------|
+| Root-level | `status.txt`, `status.json`, `config.json`, `config_snapshot.yaml`, `final_report.html`, `final_report.json` |
+| BacktestAgent | `trades.parquet`, `pnl_series.parquet`, `metrics.json`, `costs_assumptions.json`, `risk_explain.json` |
+| DecisionRiskAgent | `signals.csv`, `abstain_stats.json`, `decision_action.json`, `decision_explain.json` |
+| RobustnessAgent | `summary.json`, `monte_carlo.json` |
+| ShadowMonitorAgent (shadow mode) | `shadow_metrics.json`, `shadow_summary.json` (validated only when folder exists) |
+| DriftAgent (when present) | `drift_summary.json` (validated only when folder exists) |
+
+> **Authoritative list**: `validate_run.py` `REQUIRED_ARTIFACTS`, `SHADOW_ARTIFACTS`, and `DRIFT_ARTIFACTS` dicts.
+
+### Optional / debug artifacts
+
+Each agent may emit additional files (logs, HTML reports, parquet analysis files, model artifacts) for debugging and analysis. These are not enforced by validation and may change between releases. See each agent's implementation for the current set.
 
 ---
 
@@ -164,26 +109,17 @@ runs/PLTR/<RUN_ID>/
 
 ### GREEN (all must pass)
 
-1. **Artifacts complete**: All required files exist per agent
-2. **Sanity tests pass**: shuffled_labels_auc <= 0.55 AND future_shift_auc <= 0.55
-3. **Metrics present**: EV_per_trade, max_drawdown, win_rate, avg_trades_per_month all present in metrics.json
-4. **Abstain stats present**: abstain_ratio, enter_count, abstain_count, signals_per_month present
-5. **OOS sample count**: >= 20 minimum (warning if < 250)
-6. **JSON schema valid**: final_report.json passes schema validation
-7. **Data quality**: DataAgent quality_report.passed == true
+`validate_run.py` runs a series of validation steps (artifact completeness, sanity tests, required metrics, content hash integrity, edge gates, and others). See `validate_run.py` for the authoritative step list and thresholds.
 
 ### RED (any failure)
 
-- Missing required artifact -> RED
-- Sanity test AUC above threshold -> RED (possible leakage)
-- Missing metric fields -> RED
-- Agent status == FAILED -> RED
+Any validation step failure causes RED. Common failure classes include missing required artifacts, sanity test leakage detection, content hash mismatches, and edge gate failures. See `validate_run.py` for the authoritative failure conditions and thresholds.
 
 ### Where computed
 
 - **Per-agent**: Each agent sets `status` in its `output.json`
 - **Pipeline-level**: `OrchestratorAgent` aggregates into `status.json`
-- **Post-run**: `validate_run.py` performs independent validation
+- **Post-run**: `validate_run.py` performs independent validation (authoritative gate)
 
 ---
 
@@ -196,7 +132,9 @@ runs/PLTR/<RUN_ID>/
 
 ---
 
-## Data Flow
+## Data Flow (Simplified)
+
+High-level flow showing key artifacts. For the complete pipeline and mode-dependent agents, see `agents/orchestrator_agent.py`.
 
 ```
 Yahoo Finance API
@@ -208,23 +146,32 @@ Yahoo Finance API
   FeatureAgent (features_v1.parquet)  <-- all features shifted by 1 day
        |
        v
-  RegimeAgent (regime_series.parquet) <-- MA/vol regimes, shifted by 1 day
+  RegimeAgent / VolatilityRegimeAgent <-- market regime classification
        |
        v
   EventModelAgent (event_model.pkl)   <-- logistic + isotonic calibration
        |
        v
-  BacktestAgent (predictions_oos.parquet) <-- walk-forward, no leakage
+  StrategyAgent (strategy_signals)    <-- MA150+ATR signals
        |
        v
-  DecisionRiskAgent (decision_action.json) <-- ENTER/ABSTAIN + because
+  BacktestAgent (trades/pnl/metrics)  <-- walk-forward, no leakage
        |
        v
-  PortfolioAgent (portfolio_plan.json)  <-- PASSIVE sizing
+  RobustnessAgent (summary.json)     <-- robustness validation
        |
        v
-  DashboardAgent (final_report.html/json) <-- everything aggregated
+  DecisionRiskAgent (decision_action) <-- ENTER/ABSTAIN + because
        |
        v
-  MemoryLearningAgent (suggestions.json) <-- learning, never auto-applied
+  [DriftAgent / ShadowMonitorAgent]   <-- mode-dependent
+       |
+       v
+  PortfolioAgent (portfolio_plan)     <-- PASSIVE sizing
+       |
+       v
+  DashboardAgent (final_report)       <-- everything aggregated
+       |
+       v
+  MemoryLearningAgent (suggestions)   <-- learning, never auto-applied
 ```

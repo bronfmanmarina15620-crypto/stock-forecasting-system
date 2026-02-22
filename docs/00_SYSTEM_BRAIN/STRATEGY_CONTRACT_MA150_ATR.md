@@ -7,12 +7,7 @@
 
 ## Parameters (source of truth: `config/strategy.yaml`)
 
-* `atr_length`: 14
-* `atr_mult`: 3.0 (ATR multiplier for trailing stop)
-* `slope_lookback`: 20 (lookback for MA150 slope)
-* `entry_lookback`: 20 (breakout lookback)
-* `atr_pct_high`: 0.04 (ATR/close threshold for RANGE_HIGH_VOL block)
-* `slope_min`: 0.0 (minimum absolute slope for trend detection)
+Defaults are defined in **`config/strategy.yaml`**. Key parameters include `atr_length`, `atr_mult`, `slope_lookback`, `entry_lookback`, `atr_pct_high`, and `slope_min`. Refer to that file for current values.
 
 ## Core Rules (Contract-Level)
 

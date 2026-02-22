@@ -1,5 +1,10 @@
 # Reproducibility & Determinism
 
+> **SNAPSHOT NOTICE**
+> This document reflects the repo state at the time of writing.
+> Authoritative sources: `determinism.py` (normaliser/volatile keys), `validate_run.py` (content hash checks), `scripts/determinism_check.sh` (check script).
+> If discrepancies exist, treat code as source of truth.
+
 ## What "determinism" means in this project
 
 Given **identical configuration** and **identical market data**, two consecutive

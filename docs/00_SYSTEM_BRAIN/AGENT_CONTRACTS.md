@@ -102,6 +102,34 @@ In this project, "Contractual" means "enforced by `validate_run.py` checks". It 
 * Inputs: all upstream artifacts needed for report.
 * Contractual: `final_report.html`, `final_report.json` (written to run root).
 
+---
+
+## Validation Tools
+
+### validate_run.py
+
+* Role: structural validation of run artifacts, content hash integrity, schema checks, and edge gate validation.
+* Edge Validation Gates step: imports `tools/edge_validate.py` functions and checks edge gates as part of the validation pipeline. Propagates failures: missing artifacts or failed gates cause validation failure.
+* Exit codes: 0 = pass, 1 = fail.
+
+### tools/edge_validate.py
+
+* Role: quantitative edge gate — computes edge metrics from existing artifacts and checks against thresholds.
+* Inputs (read-only): `BacktestAgent/trades.parquet`, `RobustnessAgent/walk_forward.json`, `RobustnessAgent/monte_carlo.json`, `RobustnessAgent/regime_contribution.json`.
+* Config: `config/edge.yaml` (thresholds).
+* Contract: `EDGE_DEFINITION.md` Sections 3–6.
+* Exit codes: 0 = all gates pass, 1 = one or more gates fail, 2 = missing/invalid artifacts.
+* No market data fetches. Deterministic.
+* Also callable standalone: `python tools/edge_validate.py --run <path>`.
+
+### Run-time edge persistence (run.py)
+
+* After a successful run, `run.py` calls edge validation and writes:
+  * `edge_report.txt` — human-readable report
+  * `edge_summary.json` — machine-readable summary (full schema defined in `run.py` edge persistence logic)
+
+---
+
 ## MemoryLearningAgent
 
 * Role: logs run summary and metrics for future analysis (no ML unless explicitly enabled).

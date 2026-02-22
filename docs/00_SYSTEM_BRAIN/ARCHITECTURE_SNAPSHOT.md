@@ -1,42 +1,27 @@
 # Architecture Snapshot
 
+> **SNAPSHOT NOTICE**
+> This document reflects the repo state at the time of writing.
+> Authoritative sources: `validate_run.py` (contracts), `agents/orchestrator_agent.py` (pipeline), `config/strategy.yaml` (defaults).
+> If discrepancies exist, treat code as source of truth.
+
 This is a snapshot of the current system shape. Keep it updated after major merges.
 
-## Pipeline Order (Current)
+## Pipeline Order
 
-Defined in `agents/orchestrator_agent.py`. All agents run in every backtest-mode run.
+**Authoritative pipeline**: `agents/orchestrator_agent.py`. Agent ordering and mode-dependent insertion (e.g., ShadowMonitorAgent in shadow mode) are defined in the orchestrator.
 
-1. DataAgent
-2. FeatureAgent
-3. RegimeAgent
-4. VolatilityRegimeAgent
-5. EventModelAgent
-6. StrategyAgent
-7. BacktestAgent
-8. RobustnessAgent
-9. DecisionRiskAgent
-10. DriftAgent
-11. PortfolioAgent
-12. DashboardAgent
-13. MemoryLearningAgent
+The high-level grouping is: Data ingestion → Feature engineering → Regime detection → Event modeling → Strategy signals → Backtesting → Robustness validation → Decision/Risk → Drift analysis → Portfolio → Dashboard → Memory/Learning.
 
-In shadow mode (`--mode shadow`), ShadowMonitorAgent is inserted before DashboardAgent.
+Mode-dependent agents (e.g., ShadowMonitorAgent, DriftAgent) are conditionally inserted by the orchestrator. Do not hard-code agent counts here; refer to the orchestrator source for the current pipeline.
 
 ## Run Directory Shape (High Level)
 
-* runs/<TICKER>/<RUN_ID>/
+Each run produces `runs/<TICKER>/<RUN_ID>/` with per-agent subdirectories and root-level metadata/config/report files.
 
-  * `_meta.json` — run metadata (ticker, run_id, git SHA, created_utc)
-  * `config.json` — frozen config (JSON)
-  * `config_snapshot.yaml` — frozen config (YAML)
-  * `status.json` — per-stage pass/fail with timestamps and integrity flag
-  * `status.txt` — human-readable status (legacy format)
-  * `run_summary.json` — ticker, decision, status, timestamps
-  * `final_report.html` — dashboard HTML report
-  * `final_report.json` — machine-readable report
-  * `<AgentName>/output.json` — per-agent output metadata
+**Contractual artifacts** (required for validity) are defined by `validate_run.py` `REQUIRED_ARTIFACTS`, `SHADOW_ARTIFACTS`, and `DRIFT_ARTIFACTS` dicts. See `AGENT_CONTRACTS.md` for the per-agent breakdown.
 
-Top-level required artifacts are defined by `validate_run.py` `REQUIRED_ARTIFACTS`; additional agent-specific artifacts may exist beyond those. Mode-dependent folders (e.g., ShadowMonitorAgent, DriftAgent) may appear depending on run mode and history.
+Additional root-level files (e.g., `_meta.json`, `config_snapshot.yaml`, `run_summary.json`, `edge_summary.json`) and per-agent outputs (`<AgentName>/output.json`) are produced as implemented by the orchestrator and agents. Mode-dependent folders (e.g., ShadowMonitorAgent, DriftAgent) may appear depending on run mode and history.
 
 ## Validation
 

@@ -3,8 +3,8 @@
 ## Pre-Deployment Verification
 
 ### ✅ Code Structure
-- [x] 10 agents implemented
-- [x] OrchestratorAgent coordinates all agents
+- [x] Pipeline agents implemented (see `agents/orchestrator_agent.py` for authoritative pipeline order)
+- [x] OrchestratorAgent coordinates agent execution
 - [x] No agent directly calls another agent
 - [x] Base agent class with common functionality
 - [x] Configuration system with defaults
