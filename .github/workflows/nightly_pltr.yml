@@ -2,16 +2,19 @@ name: Nightly PLTR Run
 
 on:
   schedule:
-    # 21:00 UTC ~= 23:00 Israel (winter time). Adjust when DST changes.
-    - cron: "0 21 * * *"
-  workflow_dispatch: {}
+    # Stock-only (daily bars): no new data on Sat/Sun, skip weekend runs.
+    - cron: '0 21 * * 1-5'
+  workflow_dispatch:
 
 jobs:
   run-pltr:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       TICKER: PLTR
+      PYTHONHASHSEED: "0"
+      TZ: "UTC"
 
     steps:
       - name: Checkout

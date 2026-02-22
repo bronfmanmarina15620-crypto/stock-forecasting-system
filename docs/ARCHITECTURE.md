@@ -1,5 +1,12 @@
 # Architecture: Stock Forecasting System (PLTR)
 
+## System Brain (Source of Truth)
+
+* docs/00_SYSTEM_BRAIN/SYSTEM_INVARIANTS.md
+* docs/00_SYSTEM_BRAIN/AGENT_CONTRACTS.md
+* docs/00_SYSTEM_BRAIN/ARCHITECTURE_SNAPSHOT.md
+* docs/00_SYSTEM_BRAIN/CONTEXT_HANDOFF.md
+
 ## Overview
 
 Single-ticker (PLTR) edge-gated trading system. The pipeline runs daily,
