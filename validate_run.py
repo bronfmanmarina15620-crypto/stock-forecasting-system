@@ -893,13 +893,18 @@ def print_summary(fail_reasons: List[str], warnings: List[str]):
 # MAIN
 # ============================================================
 
-def validate_run(run_path_str: str) -> int:
+def validate_run(run_path_str: str, *, skip_edge: bool = False) -> int:
     """Run all validations on a run directory.
+
+    Args:
+        run_path_str: Path to the run directory.
+        skip_edge: If True, skip STEP 10 (edge validation gates).
+            Used by determinism CI to isolate reproducibility checks
+            from edge/performance gating.
 
     Returns:
         0 = all passed
-        1 = validation failed (including edge gate fail)
-        2 = edge artifacts missing/invalid
+        1 = validation failed
     """
     run_path = Path(run_path_str).resolve()
 
@@ -928,18 +933,20 @@ def validate_run(run_path_str: str) -> int:
         all_failures.extend(failures)
         all_warnings.extend(warnings)
 
-    # Run edge validation separately to capture exit code
-    edge_failures, edge_warnings, edge_exit_code = validate_edge_gates(run_path)
-    all_failures.extend(edge_failures)
-    all_warnings.extend(edge_warnings)
+    if skip_edge:
+        print("\n" + "=" * 60)
+        print("STEP 10: Edge Validation Gates")
+        print("=" * 60)
+        print("  [--] Skipped (--skip-edge)")
+    else:
+        # Run edge validation separately to capture exit code
+        edge_failures, edge_warnings, _edge_exit_code = validate_edge_gates(run_path)
+        all_failures.extend(edge_failures)
+        all_warnings.extend(edge_warnings)
 
     passed = print_summary(all_failures, all_warnings)
 
-    if passed:
-        return 0
-    if edge_exit_code == 2:
-        return 2
-    return 1
+    return 0 if passed else 1
 
 
 def main():
@@ -957,14 +964,23 @@ def main():
         default=None,
         help="Compare this run to another run directory for parity check"
     )
+    parser.add_argument(
+        "--skip-edge",
+        action="store_true",
+        default=False,
+        help="Skip STEP 10 (edge validation gates). "
+             "Use for determinism CI where only reproducibility matters."
+    )
     args = parser.parse_args()
 
     print("=" * 60)
     print("RUN VALIDATION")
     print("=" * 60)
     print(f"Run path: {args.run}")
+    if args.skip_edge:
+        print("Mode: structural only (--skip-edge)")
 
-    exit_code = validate_run(args.run)
+    exit_code = validate_run(args.run, skip_edge=args.skip_edge)
 
     # If validation passed and --compare-to is set, run parity check
     if exit_code == 0 and args.compare_to:

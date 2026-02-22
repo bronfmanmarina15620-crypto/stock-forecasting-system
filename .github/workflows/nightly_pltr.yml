@@ -102,8 +102,8 @@ jobs:
           python run.py --ticker PLTR --as-of ${{ steps.asof.outputs.date }} --replay-from "$RUN_A"
           RUN_B=$(ls -dt runs/PLTR/* | head -n 1)
           echo "replay_dir=$RUN_B" >> $GITHUB_OUTPUT
-          echo "Validating replay run ..."
-          python validate_run.py --run "$RUN_B"
+          echo "Validating replay run (structural, --skip-edge) ..."
+          python validate_run.py --run "$RUN_B" --skip-edge
           echo "Comparing runs for parity ..."
           python tools/compare_runs.py "$RUN_A" "$RUN_B"
 

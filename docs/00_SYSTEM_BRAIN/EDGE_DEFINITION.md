@@ -128,11 +128,15 @@ Commands:
 - python -m pytest -q
 - python run.py --ticker PLTR
 - python validate_run.py --run runs/PLTR/<RUN_ID>
+- python validate_run.py --run runs/PLTR/<RUN_ID> --skip-edge  (structural only, no edge gates)
 
 Edge validation:
 - python tools/edge_validate.py --run runs/PLTR/<RUN_ID>
   - must print: N, E[R], PF, MDD_R, rolling stats, WF summary, regime table
   - exit code 0 if gates pass, 1 if gates fail, 2 if artifacts missing/invalid
+
+Note: Determinism CI (`determinism_check.sh`, `ci_smoke_run.sh`) uses `--skip-edge` so that
+reproducibility verification is independent of edge/performance gating.
 
 ## 8) Definition of Done (DoD)
 - EDGE_DEFINITION.md merged with thresholds filled (non-empty).

@@ -46,3 +46,12 @@ Initial entries:
 * Alternatives considered: Wire edge gates into DecisionRiskAgent (deferred — requires pipeline restructuring since edge depends on RobustnessAgent which runs after DecisionRiskAgent).
 * Impacted files: `validate_run.py`, `run.py`, `.github/workflows/nightly_pltr.yml`, `.github/workflows/nightly_pltr_shadow.yml`, `tests/test_edge_validate.py`, System Brain docs.
 * Validation: `python -m pytest tests/ -q` passes; edge artifacts created on run; validate_run Step 10 propagates edge failures.
+
+---
+
+* Date: 2026-02-22
+* Decision: Decouple determinism CI from edge validation gating.
+* Rationale: `determinism_check.sh` called `validate_run.py` which includes STEP 10 (edge gates). Edge gate failure (exit 1) or missing config (exit 2) caused determinism CI to report "DETERMINISM FAIL" even when all parity/hash/schema checks passed. This conflated reproducibility verification with strategy performance gating. `ci_smoke_run.sh` already worked around this by tolerating exit codes 1-2; this change formalizes the separation with `--skip-edge`.
+* Alternatives considered: Separate exit code ranges (rejected — fragile, callers must parse). Separate validate_determinism.py script (rejected — duplicates logic; `--skip-edge` flag is simpler).
+* Impacted files: `validate_run.py` (`--skip-edge` flag), `scripts/determinism_check.sh`, `scripts/ci_smoke_run.sh`, `.github/workflows/nightly_pltr.yml`, `docs/00_SYSTEM_BRAIN/SYSTEM_INVARIANTS.md`, `docs/00_SYSTEM_BRAIN/OPERATOR_PLAYBOOK.md`, `docs/00_SYSTEM_BRAIN/EDGE_DEFINITION.md`, `docs/00_SYSTEM_BRAIN/DECISION_LOG.md`.
+* Validation: `python -m pytest tests/ -q` passes; `validate_run.py --skip-edge` exits 0 on structurally valid runs; `validate_run.py` without flag still includes edge; determinism_check.sh uses `--skip-edge`.
