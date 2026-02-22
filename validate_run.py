@@ -18,6 +18,13 @@ from pathlib import Path
 from typing import List, Dict, Any, Tuple
 
 from determinism import CONTENT_HASH_KEY, content_hash_sha256
+from data.snapshot_store import verify_snapshot_hash, snapshot_path
+from artifacts.contract import (
+    CRITICAL_ARTIFACTS,
+    OPTIONAL_ARTIFACTS,
+    CONTENT_HASH_TARGETS as _CONTRACT_HASH_TARGETS,
+    SHADOW_HASH_TARGETS as _CONTRACT_SHADOW_TARGETS,
+)
 
 try:
     import pyarrow.parquet as pq
@@ -143,7 +150,13 @@ DRIFT_ARTIFACTS = {
 
 
 def validate_artifacts(run_path: Path) -> Tuple[List[str], List[str]]:
-    """Validate that all required artifacts exist."""
+    """Validate that all required artifacts exist.
+
+    Uses the canonical contract from artifacts/contract.py:
+      - CRITICAL_ARTIFACTS → missing = FAIL
+      - OPTIONAL_ARTIFACTS → missing = WARN (informational)
+    Shadow/Drift artifacts are validated only when their folder exists.
+    """
     fail_reasons = []
     warnings = []
 
@@ -151,32 +164,51 @@ def validate_artifacts(run_path: Path) -> Tuple[List[str], List[str]]:
     print("STEP 1: Checking Required Artifacts")
     print("=" * 60)
 
-    # Build effective artifact map: always include baseline,
-    # conditionally include shadow artifacts when they exist on disk.
-    effective = dict(REQUIRED_ARTIFACTS)
+    # --- CRITICAL artifacts (FAIL on missing) ---
+    print("\n  CRITICAL artifacts:")
+    for relpath in CRITICAL_ARTIFACTS:
+        filepath = run_path / relpath
+        if filepath.exists():
+            print(f"  [OK] {relpath}")
+        else:
+            fail_reasons.append(f"Missing CRITICAL artifact: {relpath}")
+            print(f"  [X]  {relpath}")
+
+    # --- Shadow artifacts (FAIL only when folder exists) ---
     shadow_dir = run_path / "ShadowMonitorAgent"
     if shadow_dir.exists():
-        effective.update(SHADOW_ARTIFACTS)
+        print("\n  Shadow artifacts (folder present):")
+        for folder, files in SHADOW_ARTIFACTS.items():
+            for filename in files:
+                filepath = run_path / folder / filename
+                if filepath.exists():
+                    print(f"  [OK] {folder}/{filename}")
+                else:
+                    fail_reasons.append(f"Missing shadow artifact: {folder}/{filename}")
+                    print(f"  [X]  {folder}/{filename}")
+
+    # --- Drift artifacts (FAIL only when folder exists) ---
     drift_dir = run_path / "DriftAgent"
     if drift_dir.exists():
-        effective.update(DRIFT_ARTIFACTS)
+        print("\n  Drift artifacts (folder present):")
+        for folder, files in DRIFT_ARTIFACTS.items():
+            for filename in files:
+                filepath = run_path / folder / filename
+                if filepath.exists():
+                    print(f"  [OK] {folder}/{filename}")
+                else:
+                    fail_reasons.append(f"Missing drift artifact: {folder}/{filename}")
+                    print(f"  [X]  {folder}/{filename}")
 
-    for folder, files in effective.items():
-        base = run_path if folder == "_ROOT_" else run_path / folder
-
-        if not base.exists():
-            fail_reasons.append(f"Missing folder: {base}")
-            print(f"[X] Missing folder: {folder}")
-            continue
-
-        print(f"\n[OK] Folder exists: {folder}")
-
-        for filename in files:
-            filepath = base / filename
-            if check_file_exists(filepath, fail_reasons):
-                print(f"  [OK] {filename}")
-            else:
-                print(f"  [X] {filename}")
+    # --- OPTIONAL artifacts (WARN on missing) ---
+    print("\n  OPTIONAL artifacts:")
+    for relpath in OPTIONAL_ARTIFACTS:
+        filepath = run_path / relpath
+        if filepath.exists():
+            print(f"  [OK] {relpath}")
+        else:
+            warnings.append(f"Missing OPTIONAL artifact: {relpath}")
+            print(f"  [--] {relpath}")
 
     return fail_reasons, warnings
 
@@ -531,6 +563,37 @@ def validate_content_hashes(run_path: Path) -> Tuple[List[str], List[str]]:
     return fail_reasons, warnings
 
 
+def validate_snapshot_hash(run_path: Path) -> Tuple[List[str], List[str]]:
+    """Validate data snapshot exists and its hash matches."""
+    fail_reasons = []
+    warnings = []
+
+    print("\n" + "=" * 60)
+    print("STEP 8b: Validating Data Snapshot Hash")
+    print("=" * 60)
+
+    snap_file = snapshot_path(str(run_path))
+    if not Path(snap_file).exists():
+        fail_reasons.append("Missing data snapshot: DataAgent/data_snapshot.parquet")
+        print("[X] data_snapshot.parquet not found")
+        return fail_reasons, warnings
+
+    try:
+        if verify_snapshot_hash(str(run_path)):
+            print("[OK] Snapshot hash verified")
+        else:
+            fail_reasons.append("Data snapshot hash mismatch")
+            print("[X] Snapshot hash MISMATCH")
+    except FileNotFoundError as e:
+        fail_reasons.append(f"Snapshot verification failed: {e}")
+        print(f"[X] {e}")
+    except Exception as e:
+        fail_reasons.append(f"Snapshot verification error: {e}")
+        print(f"[X] Error verifying snapshot: {e}")
+
+    return fail_reasons, warnings
+
+
 def validate_drift_summary(run_path: Path) -> Tuple[List[str], List[str]]:
     """Validate DriftAgent/drift_summary.json if present (optional)."""
     fail_reasons = []
@@ -856,6 +919,7 @@ def validate_run(run_path_str: str) -> int:
         validate_final_report_schema,
         validate_status_json,
         validate_content_hashes,
+        validate_snapshot_hash,
         validate_drift_summary,
     ]
 
@@ -888,6 +952,11 @@ def main():
         required=True,
         help="Path to run directory (e.g., runs/PLTR/20260214_151806_xaji0y)"
     )
+    parser.add_argument(
+        "--compare-to",
+        default=None,
+        help="Compare this run to another run directory for parity check"
+    )
     args = parser.parse_args()
 
     print("=" * 60)
@@ -895,7 +964,20 @@ def main():
     print("=" * 60)
     print(f"Run path: {args.run}")
 
-    sys.exit(validate_run(args.run))
+    exit_code = validate_run(args.run)
+
+    # If validation passed and --compare-to is set, run parity check
+    if exit_code == 0 and args.compare_to:
+        print()
+        from tools.compare_runs import compare_runs
+        result = compare_runs(args.run, args.compare_to)
+        if not result["passed"]:
+            print("\n[X] PARITY CHECK FAILED")
+            exit_code = 1
+        else:
+            print("\n[OK] PARITY CHECK PASSED")
+
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

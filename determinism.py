@@ -145,3 +145,31 @@ def content_hash_sha256(obj: Any) -> str:
     """
     canon = canonical_json(obj)
     return hashlib.sha256(canon.encode("utf-8")).hexdigest()
+
+
+def dump_canonical_json(path: str, obj: Any, *, default=None) -> None:
+    """Write *obj* to *path* as canonical JSON (sorted keys, stable format).
+
+    This is the single authoritative writer for determinism-sensitive
+    JSON artifacts.  All critical-path JSON writes should use this
+    function so that key order and formatting are globally consistent.
+
+    Parameters
+    ----------
+    path : str
+        Destination file path.
+    obj : Any
+        JSON-serializable object.
+    default : callable, optional
+        Fallback serializer for non-standard types (e.g., ``str`` for
+        numpy scalars or datetime objects).  Passed through to
+        ``json.dump(default=...)``.
+
+    Format: indent=2, sort_keys=True, ensure_ascii=False, trailing newline.
+    """
+    import os as _os
+    _os.makedirs(_os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(obj, f, indent=2, sort_keys=True, ensure_ascii=False,
+                  default=default)
+        f.write("\n")

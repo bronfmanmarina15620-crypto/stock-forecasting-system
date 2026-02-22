@@ -8,6 +8,18 @@ These are non-negotiable. Any change that violates these requires an explicit PR
 * JSON artifacts must be canonical (sorted keys; stable ordering) where applicable.
 * No hidden randomness. Any randomness must be seeded and documented.
 
+### Full Deterministic Mode
+
+* **Thread/env pinning**: `run.py` sets `OMP_NUM_THREADS=1`, `OPENBLAS_NUM_THREADS=1`, `MKL_NUM_THREADS=1`, `NUMEXPR_NUM_THREADS=1`, `VECLIB_MAXIMUM_THREADS=1`, and `PYTHONHASHSEED=0` before any numeric library import. All CI workflows (`nightly_pltr.yml`, `determinism.yml`) set the same env vars. The determinism check script (`scripts/determinism_check.sh`) also sets them and accepts a configurable `PYTHON` binary.
+* **As-of date**: Every run has a frozen `as_of_date` (end date for data window). Precedence: `--as-of` CLI flag > `AS_OF_DATE` env var > today. Persisted in `_meta.json` and `config_snapshot.yaml`.
+* **Data snapshots**: DataAgent saves a normalized `data_snapshot.parquet` + `snapshot_hash.txt` every run. The snapshot hash (method: `canonical_df_v1`) is computed from the DataFrame's logical content (columns, dtypes, sorted index in ISO format, NaN-normalized values) — not parquet bytes — for cross-environment stability. The hash method is recorded in `data_snapshot_hash_method` in run metadata.
+* **Replay mode**: `--replay-from <path>` loads data from a prior run's snapshot instead of fetching live data. Accepts both a run directory or a direct `.parquet` file path. No network calls in replay mode.
+* **Canonical JSON**: All critical-path JSON writes use `determinism.dump_canonical_json()` (sorted keys, indent=2, ensure_ascii=False, trailing newline) for globally consistent serialization. This includes `BaseAgent.save_output()`, `BaseAgent.save_artifact()`, `DashboardAgent`, `OrchestratorAgent`, `DriftAgent`, `ShadowMonitorAgent`, and all `run.py` metadata writes. The function accepts an optional `default` parameter for non-standard types.
+* **Replay parity gate**: `tools/compare_runs.py` compares canonical JSON hashes and snapshot hashes between two runs. Exit code 0 = parity PASS, 1 = FAIL. `final_report.html` is excluded from parity comparison (contains generation timestamps); deterministic content is verified via `final_report.json`.
+* **Determinism check**: `bash scripts/determinism_check.sh [TICKER] [AS_OF_DATE]` runs live + replay and verifies parity end-to-end. Configurable via `PYTHON` env var.
+* **CI smoke test**: `determinism.yml` includes a `determinism-smoke` job (manual dispatch only) that runs a pinned-date determinism check.
+* **Nightly replay parity**: The nightly workflow runs a live run, then a replay from its snapshot, and compares both for parity. Parity failure triggers Telegram notification.
+
 ## Strategy Scope
 
 * Single trading strategy only: MA150 + ATR.
@@ -22,6 +34,9 @@ These are non-negotiable. Any change that violates these requires an explicit PR
 
 * Required artifacts must be produced for every run, and validated by `validate_run.py`.
 * Any artifact hashing/integrity checks must be stable and reproducible.
+* The canonical artifact contract is defined in `artifacts/contract.py` (`CRITICAL_ARTIFACTS`, `OPTIONAL_ARTIFACTS`, `CONTENT_HASH_TARGETS`, `VALID_DECISIONS`, `PARITY_IGNORE`, schema key lists).
+* `validate_run.py` imports from `artifacts/contract.py`: missing CRITICAL artifacts FAIL validation; missing OPTIONAL artifacts produce a WARNING only.
+* `validate_run.py` verifies data snapshot hash integrity (step 8b) in addition to JSON content hashes (step 8).
 
 ## Pipeline Contract
 
