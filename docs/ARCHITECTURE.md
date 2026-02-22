@@ -109,26 +109,22 @@ Each agent may emit additional files (logs, HTML reports, parquet analysis files
 
 ### GREEN (all must pass)
 
-1. **Artifacts complete**: All required files exist per agent
-2. **Sanity tests pass**: shuffled_labels_auc <= 0.55 AND future_shift_auc <= 0.55
-3. **Metrics present**: EV_per_trade, max_drawdown, win_rate, avg_trades_per_month all present in metrics.json
-4. **Abstain stats present**: abstain_ratio, enter_count, abstain_count, signals_per_month present
-5. **OOS sample count**: >= 20 minimum (warning if < 250)
-6. **JSON schema valid**: final_report.json passes schema validation
-7. **Data quality**: DataAgent quality_report.passed == true
+`validate_run.py` runs 10 validation steps: artifact completeness, sanity tests, required metrics, abstain stats, OOS sample size, final report schema, status.json structure, content hash integrity, drift summary (optional), and edge gates. See `validate_run.py` for the authoritative step list and thresholds.
 
 ### RED (any failure)
 
 - Missing required artifact -> RED
 - Sanity test AUC above threshold -> RED (possible leakage)
-- Missing metric fields -> RED
+- Missing required metric/abstain fields -> RED
+- Content hash mismatch -> RED
+- Edge gates fail -> RED
 - Agent status == FAILED -> RED
 
 ### Where computed
 
 - **Per-agent**: Each agent sets `status` in its `output.json`
 - **Pipeline-level**: `OrchestratorAgent` aggregates into `status.json`
-- **Post-run**: `validate_run.py` performs independent validation
+- **Post-run**: `validate_run.py` performs independent validation (authoritative gate)
 
 ---
 
@@ -141,7 +137,9 @@ Each agent may emit additional files (logs, HTML reports, parquet analysis files
 
 ---
 
-## Data Flow
+## Data Flow (Simplified)
+
+High-level flow showing key artifacts. For the complete pipeline and mode-dependent agents, see `agents/orchestrator_agent.py`.
 
 ```
 Yahoo Finance API
@@ -153,23 +151,32 @@ Yahoo Finance API
   FeatureAgent (features_v1.parquet)  <-- all features shifted by 1 day
        |
        v
-  RegimeAgent (regime_series.parquet) <-- MA/vol regimes, shifted by 1 day
+  RegimeAgent / VolatilityRegimeAgent <-- market regime classification
        |
        v
   EventModelAgent (event_model.pkl)   <-- logistic + isotonic calibration
        |
        v
-  BacktestAgent (predictions_oos.parquet) <-- walk-forward, no leakage
+  StrategyAgent (strategy_signals)    <-- MA150+ATR signals
        |
        v
-  DecisionRiskAgent (decision_action.json) <-- ENTER/ABSTAIN + because
+  BacktestAgent (trades/pnl/metrics)  <-- walk-forward, no leakage
        |
        v
-  PortfolioAgent (portfolio_plan.json)  <-- PASSIVE sizing
+  RobustnessAgent (summary.json)     <-- robustness validation
        |
        v
-  DashboardAgent (final_report.html/json) <-- everything aggregated
+  DecisionRiskAgent (decision_action) <-- ENTER/ABSTAIN + because
        |
        v
-  MemoryLearningAgent (suggestions.json) <-- learning, never auto-applied
+  [DriftAgent / ShadowMonitorAgent]   <-- mode-dependent
+       |
+       v
+  PortfolioAgent (portfolio_plan)     <-- PASSIVE sizing
+       |
+       v
+  DashboardAgent (final_report)       <-- everything aggregated
+       |
+       v
+  MemoryLearningAgent (suggestions)   <-- learning, never auto-applied
 ```

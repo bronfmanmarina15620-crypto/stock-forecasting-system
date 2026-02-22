@@ -19,6 +19,7 @@ python validate_run.py --run $RUN_PATH
 
 - **0** = PASS (all validations passed)
 - **1** = FAIL (one or more validations failed)
+- **2** = FAIL (edge artifacts missing or invalid)
 
 ## What It Checks
 
@@ -65,7 +66,7 @@ Validates that sanity tests passed:
 Checks that metrics.json contains required fields as defined by `REQUIRED_METRICS_FIELDS` in `validate_run.py` (authoritative source).
 
 ### 4. Abstain Statistics
-Checks that abstain_stats.json contains required fields as defined by `REQUIRED_ABSTAIN_FIELDS` in `validate_run.py` (authoritative source).
+Checks that abstain_stats.json contains required fields as defined by `REQUIRED_ABSTAIN_STATS_FIELDS` in `validate_run.py` (authoritative source).
 
 ### 5. OOS Sample Size
 Warns if predictions_oos.parquet has < 250 rows
@@ -74,77 +75,52 @@ Warns if predictions_oos.parquet has < 250 rows
 
 ## Example Output
 
+> **Note**: The example below is illustrative. The actual validator runs 10 steps (artifact check, sanity tests, metrics, abstain stats, OOS samples, final report schema, status.json, content hash integrity, drift summary, edge gates). See `validate_run.py` for the current step sequence and output format.
+
 ### ✅ Successful Validation
 
 ```
 ============================================================
 RUN VALIDATION
 ============================================================
-Run path: C:\...\runs\PLTR\20260214_151806_xaji0y
+Run path: runs/PLTR/20260214_151806_xaji0y
 
 ============================================================
 STEP 1: Checking Required Artifacts
 ============================================================
 
-✓ Folder exists: BacktestAgent
-  ✓ predictions_oos.parquet
-  ✓ sanity_tests.json
-  ✓ trades.parquet
-  ✓ pnl_series.parquet
-  ✓ metrics.json
-  ✓ costs_assumptions.json
+[OK] Folder exists: BacktestAgent
+  [OK] trades.parquet
+  [OK] pnl_series.parquet
+  [OK] metrics.json
+  [OK] costs_assumptions.json
+  [OK] risk_explain.json
 
-✓ Folder exists: DecisionRiskAgent
-  ✓ signals.csv
-  ✓ abstain_stats.json
-  ✓ decision_action.json
-  ✓ decision_explain.json
+[OK] Folder exists: DecisionRiskAgent
+  [OK] signals.csv
+  [OK] abstain_stats.json
+  [OK] decision_action.json
+  [OK] decision_explain.json
 
-✓ Folder exists: DashboardAgent
-  ✓ final_report.html
-  ✓ final_report.json
+[OK] Folder exists: RobustnessAgent
+  [OK] summary.json
+  [OK] monte_carlo.json
 
-✓ Folder exists: _ROOT_
-  ✓ status.txt
+[OK] Folder exists: _ROOT_
+  [OK] status.txt
+  [OK] status.json
+  [OK] config.json
+  [OK] config_snapshot.yaml
+  [OK] final_report.html
+  [OK] final_report.json
 
-============================================================
-STEP 2: Validating Sanity Tests
-============================================================
-✓ Shuffled labels AUC: 0.512 (PASS)
-✓ Future shift AUC: 0.498 (PASS)
-
-============================================================
-STEP 3: Validating Metrics
-============================================================
-
-Required fields:
-  ✓ EV_per_trade: 0.0052
-  ✓ max_drawdown: -0.083
-  ✓ win_rate: 0.621
-  ✓ avg_trades_per_month: 4.2
-
-============================================================
-STEP 4: Validating Abstain Statistics
-============================================================
-
-Required fields:
-  ✓ abstain_ratio: 0.785
-  ✓ enter_count: 42
-  ✓ abstain_count: 154
-  ✓ signals_per_month: 4.2
-
-============================================================
-STEP 5: Validating OOS Sample Size
-============================================================
-
-OOS rows: 384
-✓ Sufficient OOS samples (≥ 250)
+  ... (steps 2–10 follow) ...
 
 ============================================================
 VALIDATION SUMMARY
 ============================================================
 
-✅ VALIDATION PASSED
+[OK] VALIDATION PASSED
 All checks passed successfully!
 ============================================================
 ```
