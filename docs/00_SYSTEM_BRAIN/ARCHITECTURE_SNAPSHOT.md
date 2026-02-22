@@ -36,6 +36,8 @@ In shadow mode (`--mode shadow`), ShadowMonitorAgent is inserted before Dashboar
   * `final_report.json` — machine-readable report
   * `<AgentName>/output.json` — per-agent output metadata
 
+Top-level required artifacts are defined by `validate_run.py` `REQUIRED_ARTIFACTS`; additional agent-specific artifacts may exist beyond those.
+
 ## Validation
 
 * `validate_run.py` must pass for any "SUCCESS" run.

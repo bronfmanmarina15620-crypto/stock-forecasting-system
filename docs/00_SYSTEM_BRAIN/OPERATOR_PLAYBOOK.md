@@ -21,3 +21,4 @@
 * `final_report.html` and `final_report.json` exist in the run directory.
 * All required artifacts exist per `validate_run.py` REQUIRED_ARTIFACTS.
 * All `content_hash_sha256` integrity checks pass.
+* `validate_run.py` is the authoritative gate for required artifacts. Extra artifacts may appear in the run directory; do not treat them as failures unless `validate_run.py` fails.
