@@ -9,18 +9,15 @@
 
    * `python validate_run.py --run runs/PLTR/<RUN_ID>`
 
-## Replay / Parity (if implemented)
+## Shadow Mode
 
-* Compare two runs:
-
-  * `python tools/compare_runs.py --run-a <A> --run-b <B>`
-* Or:
-
-  * `python validate_run.py --run <REPLAY> --compare-to <ORIGINAL>`
+* `python run.py --ticker PLTR --mode shadow`
+* Inserts ShadowMonitorAgent before DashboardAgent for monitoring-only metrics.
 
 ## Definition of Success
 
-* Run completes with SUCCESS status output (as implemented).
-* validate_run.py passes.
-* final_report.html exists.
-* Required artifacts exist.
+* `run_summary.json` shows `status: SUCCESS`.
+* `validate_run.py` exits with code 0.
+* `final_report.html` and `final_report.json` exist in the run directory.
+* All required artifacts exist per `validate_run.py` REQUIRED_ARTIFACTS.
+* All `content_hash_sha256` integrity checks pass.

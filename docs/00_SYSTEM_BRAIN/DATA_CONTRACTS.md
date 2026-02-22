@@ -13,5 +13,5 @@
 
 ## Timezones / Calendars
 
-* Normalize to a single convention used by the system (document actual behavior if already implemented).
-* Trading calendar/holidays must be consistent with provider output.
+* The system uses provider-native timestamps; normalization behavior is as implemented in DataAgent.
+* Trading calendar/holidays are inherited from the data provider output.
