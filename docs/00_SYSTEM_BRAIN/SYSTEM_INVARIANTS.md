@@ -35,6 +35,16 @@ These are non-negotiable. Any change that violates these requires an explicit PR
 * Nightly trading workflows (standard + shadow) run Mon–Fri only (stock-only, daily bars — no new data on weekends). Schedule is `21:00 UTC` (cron `0 21 * * 1-5`); local Israel time varies with DST (23:00 IST winter / 00:00 IDT summer next-day). Day-of-week is evaluated in UTC, so Friday's run always fires on Friday UTC regardless of local offset.
 * A separate daily health check workflow runs 7/7 for infra/runtime breakage detection. It must NOT execute `run.py` or produce `runs/` artifacts.
 
+## Edge Validation
+
+* `tools/edge_validate.py` provides a formal, quantitative edge gate for the MA150+ATR strategy.
+* Edge metrics (expectancy, profit factor, drawdown in R, rolling stability, walk-forward stability) are computed deterministically from existing run artifacts only.
+* Thresholds are defined in `config/edge.yaml` (runtime source of truth) and documented in `EDGE_DEFINITION.md`.
+* Missing or invalid artifacts must cause validation failure (exit code 2), never silent fallback.
+* Kill-switch conditions (rolling edge breakdown, drawdown shock) force ABSTAIN until explicit reset criteria are met.
+* **Hard failure enforcement:** edge exit_code 1 (gates fail) or 2 (missing/invalid artifacts) must prevent run status SUCCESS. `run.py` runs edge validation before writing the final status; failure marks the run FAILED with a non-zero program exit code. No fallback path can produce SUCCESS when edge_exit_code != 0.
+* **Exit code semantics:** 0 = edge PASS, 1 = edge computed but gates FAIL, 2 = missing/invalid artifacts.
+
 ## Change Control
 
 * Any change to contracts/invariants must:

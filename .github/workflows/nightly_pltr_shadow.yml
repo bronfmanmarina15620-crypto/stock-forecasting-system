@@ -82,6 +82,22 @@ jobs:
           echo "drift_eligible=${DRIFT_ELIGIBLE}" >> "$GITHUB_OUTPUT"
           echo "drift_scanned=${DRIFT_SCANNED}" >> "$GITHUB_OUTPUT"
           echo "drift_reason=${DRIFT_REASON}" >> "$GITHUB_OUTPUT"
+          # Read edge summary if present
+          EDGE="${RUN_DIR}/edge_summary.json"
+          if [ -f "$EDGE" ]; then
+            EDGE_PASS=$(python3 -c "import json; e=json.load(open('${EDGE}')); print('PASS' if e.get('edge_pass') else 'FAIL')" || echo "na")
+            EDGE_N=$(python3 -c "import json; print(json.load(open('${EDGE}')).get('N',0))" || echo "0")
+            EDGE_E=$(python3 -c "import json; print(round(json.load(open('${EDGE}')).get('expectancy',0.0),4))" || echo "0")
+            EDGE_PF=$(python3 -c "import json; print(round(json.load(open('${EDGE}')).get('pf',0.0),4))" || echo "0")
+            EDGE_MDD=$(python3 -c "import json; print(round(json.load(open('${EDGE}')).get('mdd_r',0.0),4))" || echo "0")
+          else
+            EDGE_PASS="na"; EDGE_N="0"; EDGE_E="0"; EDGE_PF="0"; EDGE_MDD="0"
+          fi
+          echo "edge_pass=${EDGE_PASS}" >> "$GITHUB_OUTPUT"
+          echo "edge_n=${EDGE_N}" >> "$GITHUB_OUTPUT"
+          echo "edge_e=${EDGE_E}" >> "$GITHUB_OUTPUT"
+          echo "edge_pf=${EDGE_PF}" >> "$GITHUB_OUTPUT"
+          echo "edge_mdd=${EDGE_MDD}" >> "$GITHUB_OUTPUT"
 
       - name: Validate run
         id: validate
@@ -103,14 +119,19 @@ jobs:
           DRIFT_ELIGIBLE="${{ steps.shadow.outputs.drift_eligible }}"
           DRIFT_SCANNED="${{ steps.shadow.outputs.drift_scanned }}"
           DRIFT_REASON="${{ steps.shadow.outputs.drift_reason }}"
+          EDGE_PASS="${{ steps.shadow.outputs.edge_pass }}"
+          EDGE_N="${{ steps.shadow.outputs.edge_n }}"
+          EDGE_E="${{ steps.shadow.outputs.edge_e }}"
+          EDGE_PF="${{ steps.shadow.outputs.edge_pf }}"
+          EDGE_MDD="${{ steps.shadow.outputs.edge_mdd }}"
           # Include drift info only if DriftAgent ran
           if [ "$DRIFT_STATUS" != "na" ]; then
             DRIFT_PART=" | DRIFT=${DRIFT_STATUS}/${DRIFT_FLAG} COVERAGE=${DRIFT_USED}/${DRIFT_ELIGIBLE} SCANNED=${DRIFT_SCANNED} REASON=${DRIFT_REASON}"
           else
             DRIFT_PART=""
           fi
-          TEXT=$(printf '\xe2\x9c\x85 SHADOW OK | PLTR | RUN_ID=%s | DECISION=%s | REGIME=%s%s' \
-            "$RUN_ID" "$DECISION" "$REGIME" "$DRIFT_PART")
+          TEXT=$(printf '\xe2\x9c\x85 SHADOW OK | PLTR | RUN_ID=%s | DECISION=%s | REGIME=%s | EDGE=%s N=%s E=%s PF=%s MDD_R=%s%s' \
+            "$RUN_ID" "$DECISION" "$REGIME" "$EDGE_PASS" "$EDGE_N" "$EDGE_E" "$EDGE_PF" "$EDGE_MDD" "$DRIFT_PART")
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
             --data-urlencode "text=${TEXT}" || true

@@ -54,6 +54,25 @@ jobs:
           print('decision=' + s.get('decision', 'UNKNOWN'))
           print('has_trade=' + str(s.get('has_trade', False)).lower())
           " >> $GITHUB_OUTPUT
+          # Read edge summary if present
+          EDGE="${LATEST_DIR}/edge_summary.json"
+          if [ -f "$EDGE" ]; then
+            python3 -c "
+          import json
+          e = json.load(open('${EDGE}'))
+          print('edge_pass=' + ('PASS' if e.get('edge_pass') else 'FAIL'))
+          print('edge_n=' + str(e.get('N', 0)))
+          print('edge_e=' + str(round(e.get('expectancy', 0.0), 4)))
+          print('edge_pf=' + str(round(e.get('pf', 0.0), 4)))
+          print('edge_mdd=' + str(round(e.get('mdd_r', 0.0), 4)))
+          " >> $GITHUB_OUTPUT
+          else
+            echo "edge_pass=na" >> $GITHUB_OUTPUT
+            echo "edge_n=0" >> $GITHUB_OUTPUT
+            echo "edge_e=0" >> $GITHUB_OUTPUT
+            echo "edge_pf=0" >> $GITHUB_OUTPUT
+            echo "edge_mdd=0" >> $GITHUB_OUTPUT
+          fi
           echo "Latest run dir: $LATEST_DIR"
 
       - name: Validate run
@@ -76,6 +95,8 @@ jobs:
             ${{ steps.latest.outputs.latest_dir }}/BacktestAgent/sanity_tests.json
             ${{ steps.latest.outputs.latest_dir }}/DecisionRiskAgent/abstain_stats.json
             ${{ steps.latest.outputs.latest_dir }}/DecisionRiskAgent/decision_action.json
+            ${{ steps.latest.outputs.latest_dir }}/edge_summary.json
+            ${{ steps.latest.outputs.latest_dir }}/edge_report.txt
           if-no-files-found: error
 
       - name: Log success
@@ -95,7 +116,12 @@ jobs:
           RUN_ID="${{ steps.latest.outputs.run_id }}"
           DECISION="${{ steps.latest.outputs.decision }}"
           HAS_TRADE="${{ steps.latest.outputs.has_trade }}"
-          TEXT=$'✅ Nightly run SUCCESS\nTicker: PLTR\nRUN_ID: '"${RUN_ID}"$'\nCommit: '"${SHORT_SHA}"$'\nDecision: '"${DECISION}"$'\nHasTrade: '"${HAS_TRADE}"$'\nActions: '"${RUN_URL}"
+          EDGE_PASS="${{ steps.latest.outputs.edge_pass }}"
+          EDGE_N="${{ steps.latest.outputs.edge_n }}"
+          EDGE_E="${{ steps.latest.outputs.edge_e }}"
+          EDGE_PF="${{ steps.latest.outputs.edge_pf }}"
+          EDGE_MDD="${{ steps.latest.outputs.edge_mdd }}"
+          TEXT=$'✅ Nightly run SUCCESS\nTicker: PLTR\nRUN_ID: '"${RUN_ID}"$'\nCommit: '"${SHORT_SHA}"$'\nDecision: '"${DECISION}"$'\nHasTrade: '"${HAS_TRADE}"$'\nEdge: '"${EDGE_PASS}"' N='"${EDGE_N}"' E='"${EDGE_E}"' PF='"${EDGE_PF}"' MDD_R='"${EDGE_MDD}"$'\nActions: '"${RUN_URL}"
           curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
             --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
             --data-urlencode "text=${TEXT}" || true

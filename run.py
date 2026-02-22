@@ -145,6 +145,132 @@ def _persist_summary(summary: dict, run_dir: str):
             f.write(f"ERROR: {summary['error']}\n")
 
 
+def _run_edge_validation(run_dir: str):
+    """Run edge validation and persist report + summary JSON.
+
+    Writes:
+        <run_dir>/edge_report.txt   — human-readable report
+        <run_dir>/edge_summary.json — machine-readable summary
+
+    Returns True if edge gates pass, False otherwise.
+    On import/artifact errors, writes a MISSING summary and returns False.
+    """
+    try:
+        from tools.edge_validate import (
+            load_edge_config,
+            load_artifacts,
+            compute_edge_metrics,
+            check_gates,
+            check_kill_switch,
+            print_report,
+        )
+    except ImportError as e:
+        _write_edge_summary(run_dir, edge_pass=False, exit_code=2,
+                            error=f"import error: {e}")
+        return False
+
+    try:
+        thresholds = load_edge_config()
+    except SystemExit:
+        _write_edge_summary(run_dir, edge_pass=False, exit_code=2,
+                            error="missing or invalid config/edge.yaml")
+        return False
+
+    try:
+        artifacts = load_artifacts(run_dir)
+    except SystemExit as exc:
+        _write_edge_summary(run_dir, edge_pass=False, exit_code=2,
+                            error="missing or invalid artifacts")
+        return False
+
+    metrics = compute_edge_metrics(
+        trades_df=artifacts["trades"],
+        walk_forward=artifacts["walk_forward"],
+        monte_carlo=artifacts["monte_carlo"],
+        regime_contribution=artifacts["regime_contribution"],
+        roll_k=thresholds["roll_k"],
+    )
+
+    gates = check_gates(metrics, thresholds)
+    kill_switch = check_kill_switch(metrics, thresholds)
+
+    all_pass = all(g["passed"] for g in gates.values())
+    ks_triggered = kill_switch["triggered"]
+    edge_pass = all_pass and not ks_triggered
+    exit_code = 0 if edge_pass else 1
+
+    # Capture report text
+    import io
+    buf = io.StringIO()
+    import contextlib
+    with contextlib.redirect_stdout(buf):
+        print_report(metrics, gates, kill_switch)
+    report_text = buf.getvalue()
+
+    # Write edge_report.txt
+    with open(os.path.join(run_dir, "edge_report.txt"), "w") as f:
+        f.write(report_text)
+
+    # Write edge_summary.json
+    summary = {
+        "edge_pass": edge_pass,
+        "exit_code": exit_code,
+        "N": metrics["n"],
+        "expectancy": metrics["e_r"],
+        "pf": metrics["pf"],
+        "mdd_r": metrics["mdd_r"],
+        "win_rate": metrics["win_rate"],
+        "pos_roll_ratio": metrics["pos_roll_ratio"],
+        "wf_median_e": metrics["wf_median_e"],
+        "wf_pos_folds": metrics["wf_pos_folds"],
+        "kill_switch": ks_triggered,
+        "gates": {
+            name: {"passed": g["passed"], "value": g["value"],
+                   "threshold": g["threshold"]}
+            for name, g in gates.items()
+        },
+        "regime_table": metrics.get("regime_table", []),
+    }
+    with open(os.path.join(run_dir, "edge_summary.json"), "w") as f:
+        json.dump(summary, f, indent=2)
+
+    return edge_pass
+
+
+def _write_edge_summary(run_dir: str, edge_pass: bool, exit_code: int,
+                        error: str = None):
+    """Write a minimal edge_summary.json on error."""
+    summary = {
+        "edge_pass": edge_pass,
+        "exit_code": exit_code,
+        "N": 0,
+        "expectancy": 0.0,
+        "pf": 0.0,
+        "mdd_r": 0.0,
+        "win_rate": 0.0,
+        "pos_roll_ratio": 0.0,
+        "wf_median_e": 0.0,
+        "wf_pos_folds": 0.0,
+        "kill_switch": False,
+        "gates": {},
+        "regime_table": [],
+        "error": error,
+    }
+    with open(os.path.join(run_dir, "edge_summary.json"), "w") as f:
+        json.dump(summary, f, indent=2)
+    with open(os.path.join(run_dir, "edge_report.txt"), "w") as f:
+        f.write(f"EDGE: MISSING — {error}\n")
+
+
+def _read_edge_exit_code(run_dir: str) -> int:
+    """Read exit_code from edge_summary.json, default 2 on any error."""
+    try:
+        with open(os.path.join(run_dir, 'edge_summary.json')) as f:
+            return json.load(f).get('exit_code', 2)
+    except Exception:
+        return 2
+
+
 def _assert_persisted(run_dir: str, expected_status: str):
     """Re-read run_summary.json and assert status matches."""
     path = os.path.join(run_dir, 'run_summary.json')
@@ -305,13 +431,33 @@ Examples:
                 print(f"[FAIL] {summary['error']}")
                 return 1
 
-            # All outputs present — populate decision, write SUCCESS
+            # All outputs present — populate decision
             _populate_decision(summary, run_dir)
+
+            # Run edge validation BEFORE writing final status
+            edge_pass = _run_edge_validation(run_dir)
+            edge_status = "PASS" if edge_pass else "FAIL"
+            print(f"\n[EDGE] Edge validation: {edge_status}")
+            print(f"  Edge report: {run_dir}/edge_report.txt")
+            print(f"  Edge summary: {run_dir}/edge_summary.json")
+
+            if not edge_pass:
+                edge_exit_code = _read_edge_exit_code(run_dir)
+                summary['status'] = 'FAILED'
+                if edge_exit_code == 2:
+                    summary['error'] = 'Edge validation: missing or invalid artifacts'
+                else:
+                    summary['error'] = 'Edge validation: gates failed'
+                _persist_summary(summary, run_dir)
+                print(f"\n[FAIL] Edge validation failed — run marked FAILED")
+                return edge_exit_code
+
+            # Edge passed — write SUCCESS
             summary['status'] = 'SUCCESS'
             _persist_summary(summary, run_dir)
             _assert_persisted(run_dir, 'SUCCESS')
 
-            print(f"[OK] All agents completed successfully")
+            print(f"\n[OK] All agents completed successfully")
             print(f"  Decision: {summary['decision']}  HasTrade: {summary['has_trade']}")
             print(f"\nFinal Report: {run_dir}/final_report.html")
             print(f"JSON Report: {run_dir}/final_report.json")

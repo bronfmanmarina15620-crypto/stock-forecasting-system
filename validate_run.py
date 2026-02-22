@@ -667,6 +667,124 @@ def validate_drift_summary(run_path: Path) -> Tuple[List[str], List[str]]:
     return fail_reasons, warnings
 
 
+# ============================================================
+# STEP 10: Edge Validation Gates
+# ============================================================
+
+def validate_edge_gates(run_path: Path) -> Tuple[List[str], List[str], int]:
+    """Validate edge gates using tools/edge_validate.py.
+
+    Checks that the strategy has a statistical edge per EDGE_DEFINITION.md.
+    Requires BacktestAgent/trades.parquet and RobustnessAgent artifacts.
+
+    Returns:
+        (fail_reasons, warnings, edge_exit_code) — exit code semantics:
+        0 = edge PASS, 1 = gates FAIL, 2 = missing/invalid artifacts.
+    """
+    fail_reasons = []
+    warnings = []
+
+    print("\n" + "=" * 60)
+    print("STEP 10: Edge Validation Gates")
+    print("=" * 60)
+
+    # Import edge validator functions
+    try:
+        from tools.edge_validate import (
+            load_edge_config,
+            load_artifacts as load_edge_artifacts,
+            compute_edge_metrics,
+            check_gates,
+            check_kill_switch,
+        )
+    except ImportError as e:
+        fail_reasons.append(f"Cannot import edge validator: {e}")
+        print(f"  [X] Cannot import tools.edge_validate: {e}")
+        return fail_reasons, warnings, 2
+
+    # Load thresholds — intercept sys.exit(2) from missing config
+    try:
+        thresholds = load_edge_config()
+    except SystemExit as exc:
+        if exc.code == 2:
+            fail_reasons.append(
+                "Edge validation: missing or invalid config/edge.yaml (exit code 2)"
+            )
+            print("  [X] EDGE: MISSING — config/edge.yaml absent or invalid")
+            return fail_reasons, warnings, 2
+        raise
+
+    # Load artifacts — intercept sys.exit(2) from load_artifacts
+    run_dir_str = str(run_path)
+    try:
+        artifacts = load_edge_artifacts(run_dir_str)
+    except SystemExit as exc:
+        if exc.code == 2:
+            fail_reasons.append(
+                "Edge validation: missing or invalid artifacts (exit code 2)"
+            )
+            print("  [X] EDGE: MISSING — required artifacts absent or invalid")
+            return fail_reasons, warnings, 2
+        raise
+
+    # Compute metrics
+    metrics = compute_edge_metrics(
+        trades_df=artifacts["trades"],
+        walk_forward=artifacts["walk_forward"],
+        monte_carlo=artifacts["monte_carlo"],
+        regime_contribution=artifacts["regime_contribution"],
+        roll_k=thresholds["roll_k"],
+    )
+
+    # Check gates
+    gates = check_gates(metrics, thresholds)
+    kill_switch = check_kill_switch(metrics, thresholds)
+
+    # Build summary line
+    all_pass = all(g["passed"] for g in gates.values())
+    ks_triggered = kill_switch["triggered"]
+
+    if all_pass and not ks_triggered:
+        status = "PASS"
+        edge_exit_code = 0
+    else:
+        status = "FAIL"
+        edge_exit_code = 1
+
+    summary_line = (
+        f"EDGE: {status} "
+        f"(N={metrics['n']}, E={metrics['e_r']:.4f}, "
+        f"PF={metrics['pf']:.4f}, MDD_R={metrics['mdd_r']:.4f})"
+    )
+    print(f"  [{status}] {summary_line}")
+
+    # Print gate details
+    for name, gate in gates.items():
+        g_status = "OK" if gate["passed"] else "X "
+        print(
+            f"    [{g_status}] {name}: "
+            f"{gate['value']:.6f} {gate['direction']} {gate['threshold']}"
+        )
+
+    if ks_triggered:
+        print("    [X ] kill-switch TRIGGERED:")
+        for reason in kill_switch["reasons"]:
+            print(f"         - {reason}")
+
+    # Regime table
+    for row in metrics.get("regime_table", []):
+        flag = " [NO-TRADE]" if row["no_trade"] else ""
+        print(
+            f"    regime={row['regime']:15s} N={row['count']:3d} "
+            f"mean_ret={row['mean_return']:+.6f}{flag}"
+        )
+
+    if status == "FAIL":
+        fail_reasons.append(summary_line)
+
+    return fail_reasons, warnings, edge_exit_code
+
+
 def print_summary(fail_reasons: List[str], warnings: List[str]):
     """Print final validation summary."""
     print("\n" + "=" * 60)
@@ -699,13 +817,19 @@ def print_summary(fail_reasons: List[str], warnings: List[str]):
 # MAIN
 # ============================================================
 
-def validate_run(run_path_str: str) -> bool:
-    """Run all validations on a run directory. Returns True if passed."""
+def validate_run(run_path_str: str) -> int:
+    """Run all validations on a run directory.
+
+    Returns:
+        0 = all passed
+        1 = validation failed (including edge gate fail)
+        2 = edge artifacts missing/invalid
+    """
     run_path = Path(run_path_str).resolve()
 
     if not run_path.exists():
         print(f"\n[X] FAIL: Run path does not exist: {run_path}")
-        return False
+        return 1
 
     all_failures = []
     all_warnings = []
@@ -727,7 +851,18 @@ def validate_run(run_path_str: str) -> bool:
         all_failures.extend(failures)
         all_warnings.extend(warnings)
 
-    return print_summary(all_failures, all_warnings)
+    # Run edge validation separately to capture exit code
+    edge_failures, edge_warnings, edge_exit_code = validate_edge_gates(run_path)
+    all_failures.extend(edge_failures)
+    all_warnings.extend(edge_warnings)
+
+    passed = print_summary(all_failures, all_warnings)
+
+    if passed:
+        return 0
+    if edge_exit_code == 2:
+        return 2
+    return 1
 
 
 def main():
@@ -747,8 +882,7 @@ def main():
     print("=" * 60)
     print(f"Run path: {args.run}")
 
-    success = validate_run(args.run)
-    sys.exit(0 if success else 1)
+    sys.exit(validate_run(args.run))
 
 
 if __name__ == "__main__":
