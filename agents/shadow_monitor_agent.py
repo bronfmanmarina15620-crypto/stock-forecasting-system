@@ -246,6 +246,6 @@ class ShadowMonitorAgent(BaseAgent):
 
     def _write_json(self, filename: str, data: dict) -> None:
         path = os.path.join(self.agent_dir, filename)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, sort_keys=True, ensure_ascii=False)
+        from determinism import dump_canonical_json
+        dump_canonical_json(path, data)
         self.logger.info(f"Wrote {filename}")

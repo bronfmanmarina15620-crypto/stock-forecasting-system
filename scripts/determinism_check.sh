@@ -2,9 +2,11 @@
 # ============================================================
 # determinism_check.sh
 #
-# Run the pipeline twice with identical config and verify that
-# key output files are bit-for-bit identical (after normalising
-# volatile metadata such as timestamps and run IDs).
+# Full deterministic mode check: live run A + replay run B
+# from A's frozen data snapshot. Verifies parity.
+#
+# Run A: live fetch with --as-of date (frozen end date)
+# Run B: replay from A's data_snapshot.parquet (no network)
 #
 # Compares BOTH raw and normalised SHA-256 hashes:
 #   - raw match    → files are byte-identical (ideal)
@@ -14,6 +16,10 @@
 # Usage:
 #   bash scripts/determinism_check.sh          # default ticker PLTR
 #   bash scripts/determinism_check.sh TSLA     # custom ticker
+#   bash scripts/determinism_check.sh PLTR 2026-02-20  # specific as-of date
+#
+# Environment:
+#   PYTHON  — python binary (default: python)
 #
 # Exit codes:
 #   0  All target files match  → DETERMINISM PASS
@@ -22,6 +28,8 @@
 set -euo pipefail
 
 TICKER="${1:-PLTR}"
+AS_OF="${2:-$(date +%Y-%m-%d)}"
+PYTHON="${PYTHON:-python}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
@@ -34,6 +42,7 @@ export OMP_NUM_THREADS=1
 export MKL_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
+export VECLIB_MAXIMUM_THREADS=1
 
 # Target files to compare (relative to run dir)
 TARGET_FILES=(
@@ -73,25 +82,28 @@ sha256_of() {
 
 normalize_json() {
   local input="$1" output="$2"
-  python "$SCRIPT_DIR/normalize_json.py" "$input" "$output"
+  $PYTHON "$SCRIPT_DIR/normalize_json.py" "$input" "$output"
 }
 
 # ── main ─────────────────────────────────────────────────────
 
 log "=========================================="
-log "Determinism Check"
+log "Determinism Check (Full Mode)"
 log "Ticker: $TICKER"
+log "As-of date: $AS_OF"
 log "PYTHONHASHSEED=$PYTHONHASHSEED"
 log "OMP_NUM_THREADS=$OMP_NUM_THREADS"
 log "MKL_NUM_THREADS=$MKL_NUM_THREADS"
 log "OPENBLAS_NUM_THREADS=$OPENBLAS_NUM_THREADS"
 log "NUMEXPR_NUM_THREADS=$NUMEXPR_NUM_THREADS"
+log "VECLIB_MAXIMUM_THREADS=$VECLIB_MAXIMUM_THREADS"
+log "PYTHON=$PYTHON"
 log "=========================================="
 
-# ── Run A ────────────────────────────────────────────────────
+# ── Run A (live fetch with --as-of) ─────────────────────────
 
-log "Starting run A ..."
-python "$ROOT_DIR/run.py" --ticker "$TICKER"
+log "Starting run A (live, --as-of $AS_OF) ..."
+$PYTHON "$ROOT_DIR/run.py" --ticker "$TICKER" --as-of "$AS_OF"
 RUN1_DIR=$(latest_run_dir)
 if [[ -z "$RUN1_DIR" ]]; then
   fail "No run directory found after run A"
@@ -100,10 +112,19 @@ fi
 RUN1_ID=$(basename "$RUN1_DIR")
 log "Run A completed: $RUN1_ID"
 
-# ── Run B ────────────────────────────────────────────────────
+# ── Validate run A ──────────────────────────────────────────
 
-log "Starting run B ..."
-python "$ROOT_DIR/run.py" --ticker "$TICKER"
+log "Validating run A ..."
+if ! $PYTHON "$ROOT_DIR/validate_run.py" --run "$RUN1_DIR"; then
+  fail "Validation failed for run A ($RUN1_DIR)"
+  exit 1
+fi
+log "Validation passed for run A"
+
+# ── Run B (replay from A's snapshot) ────────────────────────
+
+log "Starting run B (replay from $RUN1_ID) ..."
+$PYTHON "$ROOT_DIR/run.py" --ticker "$TICKER" --as-of "$AS_OF" --replay-from "$RUN1_DIR"
 RUN2_DIR=$(latest_run_dir)
 RUN2_ID=$(basename "$RUN2_DIR")
 if [[ -z "$RUN2_DIR" || "$RUN2_DIR" == "$RUN1_DIR" ]]; then
@@ -113,25 +134,31 @@ fi
 log "Run B completed: $RUN2_ID"
 
 log ""
-log "Run A: $RUN1_ID"
-log "Run B: $RUN2_ID"
+log "Run A: $RUN1_ID (live)"
+log "Run B: $RUN2_ID (replay)"
 log ""
 
-# ── Validate both runs ──────────────────────────────────────
-
-log "Validating run A ..."
-if ! python "$ROOT_DIR/validate_run.py" --run "$RUN1_DIR"; then
-  fail "Validation failed for run A ($RUN1_DIR)"
-  exit 1
-fi
-log "Validation passed for run A"
+# ── Validate run B ──────────────────────────────────────────
 
 log "Validating run B ..."
-if ! python "$ROOT_DIR/validate_run.py" --run "$RUN2_DIR"; then
+if ! $PYTHON "$ROOT_DIR/validate_run.py" --run "$RUN2_DIR"; then
   fail "Validation failed for run B ($RUN2_DIR)"
   exit 1
 fi
 log "Validation passed for run B"
+
+# ── Replay parity comparison using tools/compare_runs.py ───
+
+log ""
+log "=========================================="
+log "Running parity comparison (A vs B)"
+log "=========================================="
+
+if $PYTHON "$ROOT_DIR/tools/compare_runs.py" "$RUN1_DIR" "$RUN2_DIR"; then
+  PARITY_PASS=true
+else
+  PARITY_PASS=false
+fi
 
 # ── Conditionally include shadow artifacts ─────────────────
 
@@ -144,7 +171,7 @@ for sf in "${SHADOW_FILES[@]}"; do
   fi
 done
 
-# ── Compare target files ────────────────────────────────────
+# ── Compare target files (detailed) ─────────────────────────
 
 PASS=true
 MISMATCH_COUNT=0
@@ -228,8 +255,8 @@ for relpath in "${TARGET_FILES[@]}"; do
   file_b="$RUN2_DIR/$relpath"
   [[ ! -f "$file_a" || ! -f "$file_b" ]] && continue
 
-  hash_a=$(python -c "import json; d=json.load(open('$file_a')); print(d.get('content_hash_sha256','(missing)'))")
-  hash_b=$(python -c "import json; d=json.load(open('$file_b')); print(d.get('content_hash_sha256','(missing)'))")
+  hash_a=$($PYTHON -c "import json; d=json.load(open('$file_a')); print(d.get('content_hash_sha256','(missing)'))")
+  hash_b=$($PYTHON -c "import json; d=json.load(open('$file_b')); print(d.get('content_hash_sha256','(missing)'))")
 
   echo "  $relpath"
   echo "    A content_hash: $hash_a"
@@ -242,16 +269,45 @@ for relpath in "${TARGET_FILES[@]}"; do
   fi
 done
 
+# ── snapshot hash cross-check ────────────────────────────────
+
+log ""
+log "=========================================="
+log "Snapshot hash cross-check"
+log "=========================================="
+
+HASH_A="$RUN1_DIR/DataAgent/snapshot_hash.txt"
+HASH_B="$RUN2_DIR/DataAgent/snapshot_hash.txt"
+if [[ -f "$HASH_A" && -f "$HASH_B" ]]; then
+  SHA_A=$(cat "$HASH_A" | tr -d '[:space:]')
+  SHA_B=$(cat "$HASH_B" | tr -d '[:space:]')
+  echo "  A snapshot_hash: $SHA_A"
+  echo "  B snapshot_hash: $SHA_B"
+  if [[ "$SHA_A" == "$SHA_B" ]]; then
+    echo "  Result: MATCH"
+  else
+    echo "  Result: MISMATCH"
+    PASS=false
+    MISMATCH_COUNT=$((MISMATCH_COUNT + 1))
+  fi
+else
+  echo "  [--] snapshot_hash.txt missing in one or both runs"
+fi
+
 # ── verdict ──────────────────────────────────────────────────
 
 echo ""
 echo "=========================================="
-if $PASS; then
-  echo "DETERMINISM PASS  (all ${#TARGET_FILES[@]} files match)"
+echo "Run A dir: $RUN1_DIR"
+echo "Run B dir: $RUN2_DIR"
+if $PASS && $PARITY_PASS; then
+  echo "DETERMINISM PASS  (all ${#TARGET_FILES[@]} files match + parity check passed)"
   echo "=========================================="
+  echo "exit_code=0"
   exit 0
 else
   echo "DETERMINISM FAIL  ($MISMATCH_COUNT of ${#TARGET_FILES[@]} files differ)"
   echo "=========================================="
+  echo "exit_code=1"
   exit 1
 fi

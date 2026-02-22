@@ -7,13 +7,29 @@ Usage:
     python run.py --ticker PLTR --config custom_config.json
 """
 
+# ── Deterministic thread/env pinning ──────────────────────────
+# MUST be set before importing numpy/pandas/scipy so BLAS/LAPACK
+# backends read these values at library init time.
+import os as _os
+for _k, _v in {
+    "OMP_NUM_THREADS": "1",
+    "OPENBLAS_NUM_THREADS": "1",
+    "MKL_NUM_THREADS": "1",
+    "NUMEXPR_NUM_THREADS": "1",
+    "VECLIB_MAXIMUM_THREADS": "1",
+}.items():
+    _os.environ.setdefault(_k, _v)
+_os.environ.setdefault("PYTHONHASHSEED", "0")
+del _k, _v
+# ──────────────────────────────────────────────────────────────
+
 import argparse
 import hashlib
 import subprocess
 import sys
 import os
 import json
-from datetime import datetime, timezone
+from datetime import datetime, date, timezone
 
 # Add current directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -67,16 +83,30 @@ def _get_git_sha() -> str:
         return 'unknown'
 
 
-def _write_meta_json(run_dir: str, ticker: str, run_id: str, git_sha: str):
+def _resolve_as_of_date(cli_value: str | None) -> date:
+    """Resolve as_of_date from CLI flag, env var, or today (in that order)."""
+    if cli_value:
+        return date.fromisoformat(cli_value)
+    env_val = os.environ.get("AS_OF_DATE")
+    if env_val:
+        return date.fromisoformat(env_val)
+    return date.today()
+
+
+def _write_meta_json(run_dir: str, ticker: str, run_id: str, git_sha: str,
+                     as_of_date: date, replay_from: str | None = None):
     """Write _meta.json immediately after run dir creation."""
     meta = {
         'ticker': ticker,
         'run_id': run_id,
         'created_utc': datetime.now(timezone.utc).isoformat(),
         'git_sha': git_sha,
+        'as_of_date': as_of_date.isoformat(),
     }
-    with open(os.path.join(run_dir, '_meta.json'), 'w') as f:
-        json.dump(meta, f, indent=2)
+    if replay_from:
+        meta['replay_from'] = replay_from
+    from determinism import dump_canonical_json
+    dump_canonical_json(os.path.join(run_dir, '_meta.json'), meta)
     return meta['created_utc']
 
 
@@ -94,9 +124,10 @@ _REQUIRED_OUTPUTS = [
 
 
 def _make_summary(ticker: str, run_id: str, git_sha: str, created_utc: str,
-                  status: str, error: str = None) -> dict:
+                  status: str, as_of_date: date = None,
+                  error: str = None) -> dict:
     """Build a summary dict. Decision/trade fields left at defaults."""
-    return {
+    d = {
         'ticker': ticker,
         'run_id': run_id,
         'status': status,
@@ -107,6 +138,9 @@ def _make_summary(ticker: str, run_id: str, git_sha: str, created_utc: str,
         'decision': 'UNKNOWN',
         'error': error,
     }
+    if as_of_date:
+        d['as_of_date'] = as_of_date.isoformat()
+    return d
 
 
 def _populate_decision(summary: dict, run_dir: str):
@@ -132,10 +166,10 @@ def _check_required_outputs(run_dir: str) -> str:
 
 def _persist_summary(summary: dict, run_dir: str):
     """Write BOTH run_summary.json and status.txt from the same dict."""
+    from determinism import dump_canonical_json
     summary['finished_utc'] = datetime.now(timezone.utc).isoformat()
 
-    with open(os.path.join(run_dir, 'run_summary.json'), 'w') as f:
-        json.dump(summary, f, indent=2)
+    dump_canonical_json(os.path.join(run_dir, 'run_summary.json'), summary)
 
     with open(os.path.join(run_dir, 'status.txt'), 'w') as f:
         f.write(f"STATUS: {summary['status']}\n")
@@ -294,8 +328,8 @@ def _run_edge_validation(run_dir: str):
         "regime_table": metrics.get("regime_table", []),
     }
     summary.update(config_info)
-    with open(os.path.join(run_dir, "edge_summary.json"), "w") as f:
-        json.dump(summary, f, indent=2)
+    from determinism import dump_canonical_json
+    dump_canonical_json(os.path.join(run_dir, "edge_summary.json"), summary)
 
     return edge_pass
 
@@ -323,8 +357,8 @@ def _write_edge_summary(run_dir: str, edge_pass: bool, exit_code: int,
         "error": error,
     }
     summary.update(config_info)
-    with open(os.path.join(run_dir, "edge_summary.json"), "w") as f:
-        json.dump(summary, f, indent=2)
+    from determinism import dump_canonical_json
+    dump_canonical_json(os.path.join(run_dir, "edge_summary.json"), summary)
     with open(os.path.join(run_dir, "edge_report.txt"), "w") as f:
         f.write(f"VERDICT: {failure_class}\n")
         f.write(f"EDGE: MISSING — {error}\n")
@@ -414,6 +448,22 @@ Examples:
         help='Override minimum required trading days (default: 252)'
     )
 
+    parser.add_argument(
+        '--as-of',
+        type=str,
+        default=None,
+        help='As-of date for data fetch (YYYY-MM-DD). '
+             'Precedence: CLI > env AS_OF_DATE > today'
+    )
+
+    parser.add_argument(
+        '--replay-from',
+        type=str,
+        default=None,
+        help='Path to source run directory for replay mode. '
+             'Loads data snapshot from that run instead of fetching live data.'
+    )
+
     args = parser.parse_args()
     
     # Check multi-ticker mode
@@ -426,12 +476,19 @@ Examples:
         ticker = args.ticker
     
     run_mode = args.mode
+    replay_from = args.replay_from
+
+    # Resolve as_of_date: CLI > env > today
+    as_of_date = _resolve_as_of_date(args.as_of)
 
     print(f"\n{'='*60}")
     print(f"Multi-Agent Stock Forecasting System")
     print(f"{'='*60}")
     print(f"Ticker: {ticker}")
     print(f"Mode: {run_mode.upper()}")
+    print(f"As-of date: {as_of_date.isoformat()}")
+    if replay_from:
+        print(f"Replay from: {replay_from}")
     print(f"{'='*60}\n")
     
     # Load or create configuration
@@ -466,8 +523,10 @@ Examples:
     print(f"Run Directory: {run_dir}\n")
 
     # Write _meta.json and initial STARTED state
-    created_utc = _write_meta_json(run_dir, ticker, run_id, git_sha)
-    summary = _make_summary(ticker, run_id, git_sha, created_utc, 'STARTED')
+    created_utc = _write_meta_json(run_dir, ticker, run_id, git_sha,
+                                   as_of_date, replay_from)
+    summary = _make_summary(ticker, run_id, git_sha, created_utc, 'STARTED',
+                            as_of_date=as_of_date)
     _persist_summary(summary, run_dir)
 
     # Save configuration snapshot (JSON + YAML)
@@ -483,7 +542,11 @@ Examples:
     # Run orchestrator
     try:
         orchestrator = OrchestratorAgent(config, run_dir, logger)
-        result = orchestrator.run(mode=run_mode)
+        result = orchestrator.run(
+            mode=run_mode,
+            as_of_date=as_of_date,
+            replay_from=replay_from,
+        )
 
         print(f"\n{'='*60}")
         print(f"Run Status: {result['status']}")
@@ -501,6 +564,14 @@ Examples:
 
             # All outputs present — populate decision
             _populate_decision(summary, run_dir)
+
+            # Embed data snapshot metadata if snapshot exists
+            from data.snapshot_store import snapshot_path, snapshot_metadata
+            import pandas as pd
+            snap_file = snapshot_path(run_dir)
+            if os.path.exists(snap_file):
+                snap_df = pd.read_parquet(snap_file, engine="pyarrow")
+                summary.update(snapshot_metadata(snap_df))
 
             # Run edge validation BEFORE writing final status
             edge_pass = _run_edge_validation(run_dir)

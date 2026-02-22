@@ -40,14 +40,14 @@ class BaseAgent(ABC):
     def save_output(self, output_data: Dict[str, Any]) -> str:
         """Save agent output to output.json."""
         output_path = os.path.join(self.agent_dir, "output.json")
-        
+
         # Add metadata
         output_data['agent_name'] = self.agent_name
         output_data['timestamp'] = str(pd.Timestamp.now())
-        
-        with open(output_path, 'w') as f:
-            json.dump(output_data, f, indent=2, default=str, sort_keys=True)
-        
+
+        from determinism import dump_canonical_json
+        dump_canonical_json(output_path, output_data, default=str)
+
         self.logger.info(f"Saved output to {output_path}")
         return output_path
     
@@ -64,11 +64,11 @@ class BaseAgent(ABC):
     def save_artifact(self, filename: str, data: Any):
         """Save an artifact (file) in the agent's directory."""
         filepath = os.path.join(self.agent_dir, filename)
-        
+
         # Handle different data types
         if isinstance(data, (dict, list)):
-            with open(filepath, 'w') as f:
-                json.dump(data, f, indent=2, default=str, sort_keys=True)
+            from determinism import dump_canonical_json
+            dump_canonical_json(filepath, data, default=str)
         elif hasattr(data, 'to_parquet'):  # DataFrame
             data.to_parquet(filepath)
         elif hasattr(data, 'to_csv'):  # DataFrame

@@ -83,8 +83,8 @@ class DashboardAgent(BaseAgent):
             with open(html_path, "w", encoding="utf-8") as f:
                 f.write(html_report)
 
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(json_report, f, indent=2, ensure_ascii=False, sort_keys=True)
+            from determinism import dump_canonical_json
+            dump_canonical_json(json_path, json_report)
 
             output = {
                 "status": "SUCCESS",

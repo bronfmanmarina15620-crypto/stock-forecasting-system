@@ -18,6 +18,7 @@ from determinism import (
     PATH_KEY_SUFFIX,
     normalize,
     canonical_json,
+    dump_canonical_json,
     content_hash_sha256,
 )
 
@@ -383,3 +384,99 @@ class TestNormalizeFile:
         assert list(result.keys()) == ["a", "z"]
         assert "timestamp" not in result
         assert "data_path" not in result
+
+
+class TestDeterminismEnvVars:
+    """Verify that the determinism env-pin block in run.py is complete."""
+
+    REQUIRED_ENV_VARS = {
+        "OMP_NUM_THREADS",
+        "OPENBLAS_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+        "VECLIB_MAXIMUM_THREADS",
+    }
+
+    def test_run_py_sets_all_thread_pins(self):
+        """run.py's top-level block must set all required env vars."""
+        import ast
+
+        run_py_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "run.py",
+        )
+        with open(run_py_path) as f:
+            source = f.read()
+
+        tree = ast.parse(source)
+        # Collect all string keys from dict literals in the module body
+        set_vars: set = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Dict):
+                for key in node.keys:
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                        set_vars.add(key.value)
+
+        for var in self.REQUIRED_ENV_VARS:
+            assert var in set_vars, (
+                f"run.py does not set {var} in its top-level env pin block"
+            )
+
+    def test_pythonhashseed_set(self):
+        """run.py must set PYTHONHASHSEED=0."""
+        run_py_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "run.py",
+        )
+        with open(run_py_path) as f:
+            source = f.read()
+        assert 'PYTHONHASHSEED' in source
+        assert '"0"' in source
+
+
+class TestDumpCanonicalJson:
+    """Tests for dump_canonical_json — sorted keys, stable format."""
+
+    def test_sorted_keys(self, tmp_path):
+        path = str(tmp_path / "out.json")
+        dump_canonical_json(path, {"z": 1, "a": 2, "m": 3})
+        with open(path) as f:
+            data = json.load(f)
+        assert list(data.keys()) == ["a", "m", "z"]
+
+    def test_key_order_independent(self, tmp_path):
+        path_a = str(tmp_path / "a.json")
+        path_b = str(tmp_path / "b.json")
+        dump_canonical_json(path_a, {"z": 1, "a": 2})
+        dump_canonical_json(path_b, {"a": 2, "z": 1})
+        with open(path_a) as f:
+            content_a = f.read()
+        with open(path_b) as f:
+            content_b = f.read()
+        assert content_a == content_b
+
+    def test_trailing_newline(self, tmp_path):
+        path = str(tmp_path / "out.json")
+        dump_canonical_json(path, {"x": 1})
+        with open(path) as f:
+            content = f.read()
+        assert content.endswith("\n")
+
+    def test_ensure_ascii_false(self, tmp_path):
+        path = str(tmp_path / "out.json")
+        dump_canonical_json(path, {"emoji": "\u2764"})
+        with open(path) as f:
+            content = f.read()
+        # Non-ASCII chars should NOT be escaped
+        assert "\u2764" in content
+        assert "\\u2764" not in content
+
+    def test_default_parameter(self, tmp_path):
+        """default=str allows non-serializable types (e.g. datetime)."""
+        from datetime import datetime
+        path = str(tmp_path / "out.json")
+        data = {"ts": datetime(2026, 1, 1, 12, 0, 0)}
+        dump_canonical_json(path, data, default=str)
+        with open(path) as f:
+            loaded = json.load(f)
+        assert "2026" in loaded["ts"]

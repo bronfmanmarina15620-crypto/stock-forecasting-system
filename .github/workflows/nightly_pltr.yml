@@ -15,6 +15,11 @@ jobs:
       TICKER: PLTR
       PYTHONHASHSEED: "0"
       TZ: "UTC"
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      NUMEXPR_NUM_THREADS: "1"
+      VECLIB_MAXIMUM_THREADS: "1"
 
     steps:
       - name: Checkout
@@ -34,8 +39,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Compute as-of date
+        id: asof
+        run: echo "date=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+
       - name: Run system (PLTR)
-        run: python run.py --ticker PLTR
+        run: python run.py --ticker PLTR --as-of ${{ steps.asof.outputs.date }}
 
       - name: Find latest run folder and read summary
         id: latest
@@ -84,6 +93,19 @@ jobs:
       - name: Validate run
         run: |
           python validate_run.py --run ${{ steps.latest.outputs.latest_dir }}
+
+      - name: Replay parity check
+        id: parity
+        run: |
+          RUN_A="${{ steps.latest.outputs.latest_dir }}"
+          echo "Running replay from $RUN_A ..."
+          python run.py --ticker PLTR --as-of ${{ steps.asof.outputs.date }} --replay-from "$RUN_A"
+          RUN_B=$(ls -dt runs/PLTR/* | head -n 1)
+          echo "replay_dir=$RUN_B" >> $GITHUB_OUTPUT
+          echo "Validating replay run ..."
+          python validate_run.py --run "$RUN_B"
+          echo "Comparing runs for parity ..."
+          python tools/compare_runs.py "$RUN_A" "$RUN_B"
 
       - name: Upload reports (artifact)
         uses: actions/upload-artifact@v4

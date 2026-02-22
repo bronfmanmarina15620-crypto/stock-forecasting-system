@@ -4,8 +4,8 @@ OrchestratorAgent - Main coordinator that executes all agents in order.
 
 import os
 import json
-from typing import Dict, Any, List
-from datetime import datetime
+from datetime import date, datetime
+from typing import Dict, Any, List, Optional
 from .base_agent import BaseAgent
 from .data_agent import DataAgent
 from .feature_agent import FeatureAgent
@@ -49,14 +49,22 @@ class OrchestratorAgent(BaseAgent):
             MemoryLearningAgent,
         ]
 
-    def run(self, mode: str = "backtest") -> Dict[str, Any]:
+    def run(self, mode: str = "backtest", *,
+            as_of_date: Optional[date] = None,
+            replay_from: Optional[str] = None) -> Dict[str, Any]:
         """Execute all agents in order.
 
         Parameters
         ----------
         mode : str
             ``"backtest"`` (default) or ``"shadow"`` (monitoring-only).
+        as_of_date : date, optional
+            Frozen as-of date for deterministic runs.
+        replay_from : str, optional
+            Path to source run directory for replay mode.
         """
+        self._as_of_date = as_of_date
+        self._replay_from = replay_from
         self.logger.info(f"Starting orchestration for {self.config.ticker} (mode={mode})")
 
         # Build the agent list for this run.  In shadow mode, insert
@@ -84,7 +92,15 @@ class OrchestratorAgent(BaseAgent):
             try:
                 # Instantiate and run agent
                 agent = agent_class(self.config, self.run_dir)
-                output = agent.run()
+
+                # Pass context to DataAgent for as_of_date / replay
+                if agent_name == "DataAgent":
+                    output = agent.run(
+                        as_of_date=self._as_of_date,
+                        replay_from=self._replay_from,
+                    )
+                else:
+                    output = agent.run()
 
                 stage_end = datetime.now()
 
@@ -217,7 +233,7 @@ class OrchestratorAgent(BaseAgent):
         }
 
         status_path = os.path.join(self.run_dir, 'status.json')
-        with open(status_path, 'w') as f:
-            json.dump(status_data, f, indent=2, sort_keys=True)
+        from determinism import dump_canonical_json
+        dump_canonical_json(status_path, status_data)
 
         self.logger.info(f"Status JSON written: {status_path}")
