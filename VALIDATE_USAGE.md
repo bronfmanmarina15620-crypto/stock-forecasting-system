@@ -1,5 +1,10 @@
 # validate_run.py - Usage Guide
 
+> **SNAPSHOT NOTICE**
+> This document reflects the repo state at the time of writing.
+> Authoritative source: `validate_run.py` (artifact dicts, thresholds, step sequence).
+> If discrepancies exist, treat code as source of truth.
+
 ## Overview
 
 `validate_run.py` is a strict validator that checks if a run produced all required artifacts and meets quality standards.
@@ -54,13 +59,10 @@ Ensures all required files exist as defined by `REQUIRED_ARTIFACTS` in `validate
 - final_report.json
 
 ### 2. Sanity Tests
-Validates that sanity tests passed:
+Validates that sanity tests passed (thresholds defined in `validate_run.py` `SANITY_THRESHOLDS`):
 
-- **shuffled_labels_auc** ≤ 0.55
-  - Model shouldn't work with shuffled labels
-  
-- **future_shift_auc** ≤ 0.55
-  - Model shouldn't work with future data
+- **shuffled_labels_auc** — model shouldn't work with shuffled labels
+- **future_shift_auc** — model shouldn't work with future data
 
 ### 3. Metrics
 Checks that metrics.json contains required fields as defined by `REQUIRED_METRICS_FIELDS` in `validate_run.py` (authoritative source).
@@ -69,13 +71,13 @@ Checks that metrics.json contains required fields as defined by `REQUIRED_METRIC
 Checks that abstain_stats.json contains required fields as defined by `REQUIRED_ABSTAIN_STATS_FIELDS` in `validate_run.py` (authoritative source).
 
 ### 5. OOS Sample Size
-Warns if predictions_oos.parquet has < 250 rows
+Warns if predictions_oos.parquet has fewer rows than the threshold defined in `validate_run.py` (`MIN_OOS_ROWS_WARN`).
 
 ⚠️ This is a WARNING, not a failure
 
 ## Example Output
 
-> **Note**: The example below is illustrative. The actual validator runs 10 steps (artifact check, sanity tests, metrics, abstain stats, OOS samples, final report schema, status.json, content hash integrity, drift summary, edge gates). See `validate_run.py` for the current step sequence and output format.
+> **Note**: The example below is illustrative. The actual validator runs multiple steps (artifact check, sanity tests, metrics, content hash integrity, edge gates, and others). See `validate_run.py` for the current step sequence and output format.
 
 ### ✅ Successful Validation
 
