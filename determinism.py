@@ -37,11 +37,16 @@ CONTENT_HASH_KEY = "content_hash_sha256"
 #: docs/REPRODUCIBILITY.md — the determinism check will catch un-listed
 #: volatile keys via the suspicious-pattern detector below.
 VOLATILE_KEYS: frozenset[str] = frozenset({
+    "eligible_runs_found",  # MemoryLearningAgent: depends on runs/ directory state
     "finished",             # OrchestratorAgent per-stage wall-clock end time
+    "history_window_used",  # MemoryLearningAgent: depends on runs/ directory state
+    "replay_mode",          # run metadata: true for replay, false for live
     "run_id",               # contains wall-clock timestamp + random suffix
     "run_timestamp",        # DashboardAgent injects datetime.now().isoformat()
+    "runs_used_in_window",  # MemoryLearningAgent: depends on runs/ directory state
     "started",              # OrchestratorAgent per-stage wall-clock start time
     "timestamp",            # BaseAgent.save_output() injects pd.Timestamp.now()
+    "total_runs_scanned",   # MemoryLearningAgent: depends on runs/ directory state
 })
 
 #: Suffix for keys whose *values* are filesystem paths containing the run ID.
