@@ -464,6 +464,14 @@ Examples:
              'Loads data snapshot from that run instead of fetching live data.'
     )
 
+    parser.add_argument(
+        '--skip-edge',
+        action='store_true',
+        default=False,
+        help='Skip edge validation gate. Useful for determinism checks '
+             'where only content parity matters.'
+    )
+
     args = parser.parse_args()
     
     # Check multi-ticker mode
@@ -574,24 +582,28 @@ Examples:
                 summary.update(snapshot_metadata(snap_df))
 
             # Run edge validation BEFORE writing final status
-            edge_pass = _run_edge_validation(run_dir)
-            edge_status = "PASS" if edge_pass else "FAIL"
-            print(f"\n[EDGE] Edge validation: {edge_status}")
-            print(f"  Edge report: {run_dir}/edge_report.txt")
-            print(f"  Edge summary: {run_dir}/edge_summary.json")
+            if args.skip_edge:
+                print("\n[EDGE] Edge validation: SKIPPED (--skip-edge)")
+                edge_pass = True
+            else:
+                edge_pass = _run_edge_validation(run_dir)
+                edge_status = "PASS" if edge_pass else "FAIL"
+                print(f"\n[EDGE] Edge validation: {edge_status}")
+                print(f"  Edge report: {run_dir}/edge_report.txt")
+                print(f"  Edge summary: {run_dir}/edge_summary.json")
 
-            if not edge_pass:
-                edge_exit_code = _read_edge_exit_code(run_dir)
-                summary['status'] = 'FAILED'
-                if edge_exit_code == 2:
-                    summary['error'] = 'Edge validation: missing or invalid artifacts'
-                else:
-                    summary['error'] = 'Edge validation: gates failed'
-                _persist_summary(summary, run_dir)
-                print(f"\n[FAIL] Edge validation failed — run marked FAILED")
-                return edge_exit_code
+                if not edge_pass:
+                    edge_exit_code = _read_edge_exit_code(run_dir)
+                    summary['status'] = 'FAILED'
+                    if edge_exit_code == 2:
+                        summary['error'] = 'Edge validation: missing or invalid artifacts'
+                    else:
+                        summary['error'] = 'Edge validation: gates failed'
+                    _persist_summary(summary, run_dir)
+                    print(f"\n[FAIL] Edge validation failed — run marked FAILED")
+                    return edge_exit_code
 
-            # Edge passed — write SUCCESS
+            # Edge passed (or skipped) — write SUCCESS
             summary['status'] = 'SUCCESS'
             _persist_summary(summary, run_dir)
             _assert_persisted(run_dir, 'SUCCESS')
