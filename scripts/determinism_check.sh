@@ -102,8 +102,8 @@ log "=========================================="
 
 # ── Run A (live fetch with --as-of) ─────────────────────────
 
-log "Starting run A (live, --as-of $AS_OF) ..."
-$PYTHON "$ROOT_DIR/run.py" --ticker "$TICKER" --as-of "$AS_OF"
+log "Starting run A (live, --as-of $AS_OF, --skip-edge) ..."
+$PYTHON "$ROOT_DIR/run.py" --ticker "$TICKER" --as-of "$AS_OF" --skip-edge
 RUN1_DIR=$(latest_run_dir)
 if [[ -z "$RUN1_DIR" ]]; then
   fail "No run directory found after run A"
@@ -123,8 +123,8 @@ log "Validation passed for run A"
 
 # ── Run B (replay from A's snapshot) ────────────────────────
 
-log "Starting run B (replay from $RUN1_ID) ..."
-$PYTHON "$ROOT_DIR/run.py" --ticker "$TICKER" --as-of "$AS_OF" --replay-from "$RUN1_DIR"
+log "Starting run B (replay from $RUN1_ID, --skip-edge) ..."
+$PYTHON "$ROOT_DIR/run.py" --ticker "$TICKER" --as-of "$AS_OF" --replay-from "$RUN1_DIR" --skip-edge
 RUN2_DIR=$(latest_run_dir)
 RUN2_ID=$(basename "$RUN2_DIR")
 if [[ -z "$RUN2_DIR" || "$RUN2_DIR" == "$RUN1_DIR" ]]; then
