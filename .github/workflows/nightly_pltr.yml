@@ -108,7 +108,7 @@ jobs:
           python tools/compare_runs.py "$RUN_A" "$RUN_B"
 
       - name: Upload reports (artifact)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pltr_reports_${{ github.run_id }}
           path: |
